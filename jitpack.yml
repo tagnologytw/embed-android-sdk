@@ -2,4 +2,4 @@ jdk:
   - openjdk17
 
 install:
-  - ./gradlew :embed-android-sdk:assembleRelease --no-daemon
+  - ./gradlew :embed-android-sdk:publishReleasePublicationToMavenLocal --no-daemon
