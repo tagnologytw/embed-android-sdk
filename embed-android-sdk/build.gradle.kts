@@ -1,6 +1,7 @@
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
+    id("maven-publish")
 }
 
 android {
@@ -40,4 +41,21 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.13")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+}
+
+group = "com.github.tagnologytw"
+version = System.getenv("VERSION") ?: "local-SNAPSHOT"
+
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            groupId = "com.github.tagnologytw"
+            artifactId = "embed-android-sdk"
+            version = System.getenv("VERSION") ?: "local-SNAPSHOT"
+
+            afterEvaluate {
+                from(components["release"])
+            }
+        }
+    }
 }
