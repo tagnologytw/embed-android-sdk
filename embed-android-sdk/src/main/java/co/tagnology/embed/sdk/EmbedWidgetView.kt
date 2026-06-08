@@ -1,11 +1,14 @@
 package co.tagnology.embed.sdk
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -15,6 +18,8 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,17 +36,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.compose.ui.zIndex
 import org.json.JSONObject
 
 @Composable
@@ -57,13 +57,12 @@ fun EmbedWidgetView(
 ) {
     val tag = "EmbedSDK"
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val canonicalPage = remember(pageUrl) { canonicalizePageUrl(pageUrl) }
     var widgets by remember(pageUrl, position) { mutableStateOf<List<EmbedWidgetItem>>(emptyList()) }
     var showLightbox by remember { mutableStateOf(false) }
     var lightboxMessageJson by remember { mutableStateOf<String?>(null) }
     var lastEventJson by remember { mutableStateOf<String?>(null) }
     var lastEventAtMs by remember { mutableStateOf(0L) }
-    var lastUserTouchAtMs by remember { mutableStateOf(0L) }
-    var lastTouchedWidgetId by remember { mutableStateOf<String?>(null) }
 
     fun logLightbox(message: String) {
         Log.d(tag, "lightbox $message")
@@ -85,26 +84,10 @@ fun EmbedWidgetView(
 
         if (!enableLightbox || DEBUG_DISABLE_LIGHTBOX) return
         if (shouldOpenLightbox(eventJson)) {
-            val touchedRecently = (now - lastUserTouchAtMs) <= 800L
-            val touchedSameWidget = !sourceWidgetId.isNullOrBlank() && sourceWidgetId == lastTouchedWidgetId
-            val validClickPayload = hasValidLightboxClickPayload(eventJson)
-            if (!touchedRecently) {
-                logLightbox("open ignored reason=no_recent_user_touch sourceWidgetId=$sourceWidgetId")
-                return
-            }
-            if (!touchedSameWidget) {
-                logLightbox("open ignored reason=event_widget_mismatch sourceWidgetId=$sourceWidgetId lastTouchedWidgetId=$lastTouchedWidgetId")
-                return
-            }
-            if (!validClickPayload) {
-                logLightbox("open ignored reason=invalid_click_payload sourceWidgetId=$sourceWidgetId")
-                return
-            }
             if (!showLightbox) {
                 lightboxMessageJson = normalizeLightboxMessage(eventJson, sourceWidgetId)
                 val summary = summarizeLightboxClickPayload(lightboxMessageJson)
                 showLightbox = true
-                lastTouchedWidgetId = null
                 logLightbox("open reason=click_event eventType=$eventType sourceWidgetId=$sourceWidgetId summary=$summary")
             }
         }
@@ -201,13 +184,6 @@ fun EmbedWidgetView(
                             isVerticalScrollBarEnabled = false
                             isHorizontalScrollBarEnabled = false
                             webChromeClient = WebChromeClient()
-                            setOnTouchListener { _, event ->
-                                if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_UP) {
-                                    lastUserTouchAtMs = System.currentTimeMillis()
-                                    lastTouchedWidgetId = widget.folderId
-                                }
-                                false
-                            }
 
                             addJavascriptInterface(resizeBridge, "tagnologyResize")
                             addJavascriptInterface(eventBridge, "tagnologyEvent")
@@ -260,10 +236,14 @@ fun EmbedWidgetView(
         }
     }
 
-    if (!DEBUG_DISABLE_LIGHTBOX && showLightbox) {
-        LightboxDialog(
-            pageUrl = pageUrl,
+    if (!DEBUG_DISABLE_LIGHTBOX) {
+        LightboxOverlayHost(
+            visible = showLightbox,
             pendingMessageJson = lightboxMessageJson,
+            canonicalPage = canonicalPage,
+            onPendingMessageConsumed = {
+                lightboxMessageJson = null
+            },
             onEvent = { event ->
                 onEvent?.invoke(event)
                 if (shouldCloseLightbox(event.payloadJson)) {
@@ -281,88 +261,101 @@ fun EmbedWidgetView(
 
 // Temporary switch for debugging startup white overlay issue.
 private const val DEBUG_DISABLE_LIGHTBOX = false
+private const val DEBUG_LIGHTBOX_FORCE_LAYOUT_FIX = false
 
 @Composable
 @SuppressLint("SetJavaScriptEnabled")
-private fun LightboxDialog(
-    pageUrl: String,
+private fun LightboxOverlayHost(
+    visible: Boolean,
     pendingMessageJson: String?,
+    canonicalPage: String,
+    onPendingMessageConsumed: () -> Unit,
     onEvent: (EmbedWidgetEvent) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val tag = "EmbedSDK"
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val lightboxUrl = remember(pageUrl) {
-        "https://embed.tagnology.co/lightBox?page=$pageUrl"
+    val lightboxUrl = remember(canonicalPage) {
+        "https://embed.tagnology.co/lightBox?page=$canonicalPage"
     }
 
     var dispatchAttemptCount by remember(pendingMessageJson) { mutableStateOf(0) }
+    var isContentLoaded by remember { mutableStateOf(false) }
+    var isLightboxReady by remember { mutableStateOf(false) }
+    var localPendingMessageJson by remember(pendingMessageJson) { mutableStateOf(pendingMessageJson) }
     var lightboxWebViewRef by remember { mutableStateOf<WebView?>(null) }
-    val maxDispatchAttempts = 4
+    var overlayContainerRef by remember { mutableStateOf<FrameLayout?>(null) }
+    val maxDispatchAttempts = 2
+    BackHandler(enabled = visible) {
+        onDismiss()
+    }
 
     fun dispatchPendingMessageIfNeeded(reason: String) {
         val webView = lightboxWebViewRef ?: return
-        if (pendingMessageJson.isNullOrBlank()) return
+        if (!isContentLoaded) return
+        if (!isLightboxReady && reason != "fallback") return
+        if (localPendingMessageJson.isNullOrBlank()) return
         if (dispatchAttemptCount >= maxDispatchAttempts) return
         dispatchAttemptCount += 1
+        val messageToSend = localPendingMessageJson ?: return
         Log.d(
             tag,
-            "lightbox dispatch attempt=$dispatchAttemptCount reason=$reason payload length=${pendingMessageJson.length} summary=${summarizeLightboxClickPayload(pendingMessageJson)}"
+            "lightbox dispatch attempt=$dispatchAttemptCount reason=$reason payload length=${messageToSend.length} summary=${summarizeLightboxClickPayload(messageToSend)}"
         )
-        Log.d(tag, "lightbox dispatch payload raw=$pendingMessageJson")
-        Log.d(tag, "lightbox dispatch payload keys=${summarizePayloadKeys(pendingMessageJson)}")
-        val script = buildDispatchMessageScript(pendingMessageJson)
-        webView.evaluateJavascript(script, null)
-        Log.d(tag, "lightbox dispatch click message done attempt=$dispatchAttemptCount reason=$reason")
+        Log.d(tag, "lightbox dispatch payload raw=$messageToSend")
+        Log.d(tag, "lightbox dispatch payload keys=${summarizePayloadKeys(messageToSend)}")
+        val script = buildDispatchMessageScript(messageToSend)
+        localPendingMessageJson = null
+        webView.evaluateJavascript(script) {
+            Log.d(tag, "lightbox dispatch click message done attempt=$dispatchAttemptCount reason=$reason")
+            onPendingMessageConsumed()
+        }
     }
-    DisposableEffect(Unit) {
-        Log.d(tag, "lightbox dialog attached")
-        onDispose { Log.d(tag, "lightbox dialog detached") }
-    }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnClickOutside = false,
-            decorFitsSystemWindows = false,
-        ),
-    ) {
-        val dialogWindowProvider = LocalView.current.parent as? DialogWindowProvider
-        DisposableEffect(dialogWindowProvider) {
-            dialogWindowProvider?.window?.setLayout(
+    val hostView = LocalView.current
+    val context = LocalContext.current
+    DisposableEffect(canonicalPage) {
+        val root = hostView.rootView as? ViewGroup
+        if (root == null) {
+            return@DisposableEffect onDispose {}
+        }
+
+        val overlay = FrameLayout(context).apply {
+            layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
-            onDispose {}
+            setBackgroundColor(android.graphics.Color.BLACK)
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+            isFocusableInTouchMode = true
         }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black),
-        ) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { context ->
+
                 val eventBridge = object {
                     @JavascriptInterface
                     fun postEvent(payloadJson: String) {
                         mainHandler.post {
                             val type = parseEventType(payloadJson)
                             if (type.equals("readyLB", ignoreCase = true)) {
+                                isLightboxReady = true
                                 dispatchPendingMessageIfNeeded("readyLB")
                                 Log.d(tag, "lightbox event type=$type payload=$payloadJson")
                                 return@post
                             }
-
-                            if (type.equals("click", ignoreCase = true)) {
-                                return@post
-                            }
-
                             if (type.equals("toggleLB", ignoreCase = true)) {
                                 val open = runCatching {
-                                    JSONObject(payloadJson).optBoolean("open", true)
-                                }.getOrDefault(true)
-                                if (open) return@post
+                                    val json = JSONObject(payloadJson)
+                                    when {
+                                        json.has("open") -> json.optBoolean("open", false)
+                                        json.optJSONObject("data")?.has("open") == true -> json.optJSONObject("data")?.optBoolean("open", false) ?: false
+                                        else -> false
+                                    }
+                                }.getOrDefault(false)
+                                if (open) {
+                                    onPendingMessageConsumed()
+                                } else {
+                                    onDismiss()
+                                }
                             }
 
                             Log.d(tag, "lightbox event type=$type payload=$payloadJson")
@@ -376,100 +369,192 @@ private fun LightboxDialog(
                     }
                 }
 
-                WebView(context).apply {
-                    lightboxWebViewRef = this
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.loadsImagesAutomatically = true
-                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                    settings.mediaPlaybackRequiresUserGesture = false
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage): Boolean {
-                            val level = consoleMessage.messageLevel().name
-                            Log.d(
-                                tag,
-                                "lightbox console level=$level line=${consoleMessage.lineNumber()} source=${consoleMessage.sourceId()} message=${consoleMessage.message()}"
-                            )
-                            return true
-                        }
-                    }
-                    addJavascriptInterface(eventBridge, "tagnologyEvent")
-
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                            val target = request?.url?.toString().orEmpty()
-                            if (target.contains("/undefined")) {
-                                Log.e(
-                                    tag,
-                                    "lightbox request undefined url=$target mainFrame=${request?.isForMainFrame} method=${request?.method} hasGesture=${request?.hasGesture()}"
-                                )
-                            }
-                            return super.shouldInterceptRequest(view, request)
-                        }
-
-                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                            val target = request?.url?.toString().orEmpty()
-                            if (target.contains("/undefined")) {
-                                Log.e(tag, "lightbox navigate undefined url=$target")
-                            } else {
-                                Log.d(tag, "lightbox navigate url=$target")
-                            }
-                            return false
-                        }
-
-                        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                            super.onPageStarted(view, url, favicon)
-                            Log.d(tag, "lightbox started url=$url")
-                            evaluateJavascript(INJECT_EVENT_BRIDGE_JS, null)
-                            evaluateJavascript(INJECT_LIGHTBOX_DEBUG_JS, null)
-                        }
-
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            Log.d(tag, "lightbox finished url=$url")
-                            evaluateJavascript(INJECT_EVENT_BRIDGE_JS, null)
-                            evaluateJavascript(INJECT_LIGHTBOX_DEBUG_JS, null)
-                            postDelayed({ dispatchPendingMessageIfNeeded("onPageFinished+300ms") }, 300)
-                            postDelayed({ dispatchPendingMessageIfNeeded("onPageFinished+900ms") }, 900)
-                            postDelayed({ dispatchPendingMessageIfNeeded("onPageFinished+1800ms") }, 1800)
-                        }
-
-                        override fun onReceivedError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            error: WebResourceError?,
-                        ) {
-                            super.onReceivedError(view, request, error)
-                            Log.e(tag, "lightbox error url=${request?.url} code=${error?.errorCode} desc=${error?.description}")
-                        }
-
-                        override fun onReceivedHttpError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            errorResponse: WebResourceResponse?,
-                        ) {
-                            super.onReceivedHttpError(view, request, errorResponse)
-                            Log.e(tag, "lightbox httpError url=${request?.url} status=${errorResponse?.statusCode}")
-                        }
-                    }
-                    Log.d(tag, "lightbox url=$lightboxUrl")
-                    loadUrl(lightboxUrl)
+        val webView = WebView(context).apply {
+            setBackgroundColor(android.graphics.Color.BLACK)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.loadsImagesAutomatically = true
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            settings.mediaPlaybackRequiresUserGesture = false
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage): Boolean {
+                    val level = consoleMessage.messageLevel().name
+                    Log.d(
+                        tag,
+                        "lightbox console level=$level line=${consoleMessage.lineNumber()} source=${consoleMessage.sourceId()} message=${consoleMessage.message()}"
+                    )
+                    return true
                 }
-            },
-                update = {},
-            )
+            }
+            addJavascriptInterface(eventBridge, "tagnologyEvent")
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    val widthPx = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+                    val heightPx = height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+                    val closeZoneLeft = widthPx * 0.82f
+                    val closeZoneTop = maxOf(120f, heightPx * 0.16f)
+                    val inCloseZone = event.x >= closeZoneLeft && event.y <= closeZoneTop
+                    if (inCloseZone) {
+                        Log.d(tag, "lightbox close-zone touch x=${event.x} y=${event.y} w=$widthPx h=$heightPx")
+                        evaluateJavascript(
+                            """
+                                (function() {
+                                  try {
+                                    if (window.__tagnologyNotifyEvent) {
+                                      window.__tagnologyNotifyEvent({ eventType: 'toggleLB', open: false, reason: 'native_touch_close_zone' });
+                                    } else if (window.tagnologyEvent && window.tagnologyEvent.postEvent) {
+                                      window.tagnologyEvent.postEvent(JSON.stringify({ eventType: 'toggleLB', open: false, reason: 'native_touch_close_zone' }));
+                                    }
+                                  } catch (e) {}
+                                })();
+                            """.trimIndent(),
+                            null
+                        )
+                        onDismiss()
+                        return@setOnTouchListener true
+                    }
+                }
+                false
+            }
+
+            webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                    val target = request?.url?.toString().orEmpty()
+                    if (target.contains("/undefined")) {
+                        Log.e(
+                            tag,
+                            "lightbox request undefined url=$target mainFrame=${request?.isForMainFrame} method=${request?.method} hasGesture=${request?.hasGesture()}"
+                        )
+                    }
+                    return super.shouldInterceptRequest(view, request)
+                }
+
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val target = request?.url?.toString().orEmpty()
+                    val mainFrame = request?.isForMainFrame == true
+                    if (mainFrame && isUndefinedLightboxUrl(target)) {
+                        Log.e(tag, "lightbox navigate undefined url=$target")
+                        // Prevent blank screen caused by main-frame navigation to /undefined.
+                        return true
+                    }
+                    if (mainFrame && shouldOpenOutsideLightbox(target, request?.hasGesture() == true)) {
+                        val launched = openExternalUrl(context, target)
+                        Log.d(tag, "lightbox external_link url=$target launched=$launched")
+                        return launched
+                    }
+                    if (target.contains("/undefined")) {
+                        Log.e(tag, "lightbox navigate undefined url=$target")
+                    } else {
+                        Log.d(tag, "lightbox navigate url=$target")
+                    }
+                    return false
+                }
+
+                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    super.onPageStarted(view, url, favicon)
+                    isContentLoaded = false
+                    isLightboxReady = false
+                    Log.d(tag, "lightbox started url=$url")
+                    evaluateJavascript(INJECT_EVENT_BRIDGE_JS, null)
+                    if (DEBUG_LIGHTBOX_FORCE_LAYOUT_FIX) {
+                        evaluateJavascript(INJECT_LIGHTBOX_DEBUG_JS, null)
+                    }
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    isContentLoaded = true
+                    Log.d(tag, "lightbox finished url=$url")
+                    evaluateJavascript(INJECT_EVENT_BRIDGE_JS, null)
+                    evaluateJavascript(INJECT_LIGHTBOX_CLOSE_GUARD_JS, null)
+                    if (DEBUG_LIGHTBOX_FORCE_LAYOUT_FIX) {
+                        evaluateJavascript(INJECT_LIGHTBOX_OBSERVABILITY_JS, null)
+                    }
+                    if (DEBUG_LIGHTBOX_FORCE_LAYOUT_FIX) {
+                        evaluateJavascript(INJECT_LIGHTBOX_DEBUG_JS, null)
+                    }
+                    postDelayed({ dispatchPendingMessageIfNeeded("fallback") }, 1000)
+                    if (DEBUG_LIGHTBOX_FORCE_LAYOUT_FIX) {
+                        postDelayed({
+                            evaluateJavascript(REPORT_LIGHTBOX_STATE_JS) { result ->
+                                Log.d(tag, "lightbox state snapshot=$result")
+                            }
+                        }, 1200)
+                    }
+                }
+
+                override fun onReceivedError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    error: WebResourceError?,
+                ) {
+                    super.onReceivedError(view, request, error)
+                    Log.e(tag, "lightbox error url=${request?.url} code=${error?.errorCode} desc=${error?.description}")
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    errorResponse: WebResourceResponse?,
+                ) {
+                    super.onReceivedHttpError(view, request, errorResponse)
+                    Log.e(tag, "lightbox httpError url=${request?.url} status=${errorResponse?.statusCode}")
+                }
+            }
+            Log.d(tag, "lightbox url=$lightboxUrl")
+            loadUrl(lightboxUrl)
+        }
+
+        val statusBarOffsetPx = getStatusBarHeightPx(context)
+        overlay.addView(
+            webView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ).apply {
+                topMargin = statusBarOffsetPx
+            }
+        )
+        Log.d(tag, "lightbox apply statusBarOffsetPx=$statusBarOffsetPx")
+        root.addView(overlay)
+        lightboxWebViewRef = webView
+        overlayContainerRef = overlay
+        Log.d(tag, "lightbox overlay attached")
+
+        onDispose {
+            Log.d(tag, "lightbox overlay detached")
+            overlayContainerRef = null
+            lightboxWebViewRef = null
+            root.removeView(overlay)
+            webView.removeJavascriptInterface("tagnologyEvent")
+            webView.stopLoading()
+            webView.destroy()
+        }
+    }
+
+    LaunchedEffect(visible) {
+        overlayContainerRef?.visibility = if (visible) View.VISIBLE else View.GONE
+        if (visible) {
+            overlayContainerRef?.requestFocus()
+            dispatchPendingMessageIfNeeded("show")
         }
     }
 }
 
 private fun buildEmbedDisplayUrl(widget: EmbedWidgetItem, pageUrl: String): String {
+    val canonicalPage = canonicalizePageUrl(pageUrl)
     return buildString {
-        append("https://embed.tagnology.co/display?folderId=${widget.folderId}&page=$pageUrl")
+        append("https://embed.tagnology.co/display?folderId=${widget.folderId}&page=$canonicalPage")
         if (widget.layout.equals("floatingmedia", ignoreCase = true)) {
             append("&fullScreen=true")
         }
     }
+}
+
+private fun getStatusBarHeightPx(context: android.content.Context): Int {
+    val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+    if (resId <= 0) return 0
+    return context.resources.getDimensionPixelSize(resId).coerceAtLeast(0)
 }
 
 private fun buildEmbedIframeHtml(iframeUrl: String): String {
@@ -711,14 +796,39 @@ private fun buildEmbedIframeHtml(iframeUrl: String): String {
 
 private fun parseEventType(payloadJson: String): String {
     return runCatching {
-        JSONObject(payloadJson).optString("eventType", "unknown")
-    }.getOrElse { "unknown" }
+        extractEventType(JSONObject(payloadJson))
+    }.getOrElse {
+        when {
+            payloadJson.contains("toggleLB", ignoreCase = true) -> "toggleLB"
+            payloadJson.contains("readyLB", ignoreCase = true) -> "readyLB"
+            payloadJson.contains("close", ignoreCase = true) -> "close"
+            else -> "unknown"
+        }
+    }
+}
+
+private fun extractEventType(json: JSONObject): String {
+    val direct = listOf("eventType", "type", "event", "action")
+        .asSequence()
+        .map { key -> json.optString(key).trim() }
+        .firstOrNull { it.isNotBlank() }
+    if (!direct.isNullOrBlank()) return direct
+
+    val nested = json.optJSONObject("data")
+    if (nested != null) {
+        val nestedType = listOf("eventType", "type", "event", "action")
+            .asSequence()
+            .map { key -> nested.optString(key).trim() }
+            .firstOrNull { it.isNotBlank() }
+        if (!nestedType.isNullOrBlank()) return nestedType
+    }
+    return "unknown"
 }
 
 private fun shouldOpenLightbox(payloadJson: String): Boolean {
     return runCatching {
         val json = JSONObject(payloadJson)
-        val type = json.optString("eventType").lowercase()
+        val type = extractEventType(json).lowercase()
         if (type != "click") {
             return@runCatching false
         }
@@ -733,12 +843,22 @@ private fun shouldOpenLightbox(payloadJson: String): Boolean {
 private fun shouldCloseLightbox(payloadJson: String): Boolean {
     return runCatching {
         val json = JSONObject(payloadJson)
-        val type = json.optString("eventType").lowercase()
+        val type = extractEventType(json).lowercase()
         if (type == "togglelb") {
-            return@runCatching !json.optBoolean("open", true)
+            val open = when {
+                json.has("open") -> json.optBoolean("open", true)
+                json.optJSONObject("data")?.has("open") == true -> json.optJSONObject("data")?.optBoolean("open", true) ?: true
+                else -> true
+            }
+            return@runCatching !open
         }
         type == "close" || type == "close_lightbox" || type == "closelightbox"
-    }.getOrDefault(false)
+    }.getOrElse {
+        val raw = payloadJson.lowercase()
+        raw.contains("togglelb") && (raw.contains("\"open\":false") || raw.contains("'open':false") || raw.contains("open=false")) ||
+            raw.contains("close_lightbox") ||
+            raw.contains("closelightbox")
+    }
 }
 
 private fun normalizeLightboxMessage(payloadJson: String, sourceWidgetId: String?): String {
@@ -747,18 +867,13 @@ private fun normalizeLightboxMessage(payloadJson: String, sourceWidgetId: String
         val type = json.optString("eventType").lowercase()
         if (type != "click") return@runCatching payloadJson
 
-        // Normalize data -> item, and add highlight fallbacks so lightbox can resolve media.
         val rawItem = json.optJSONObject("item") ?: json.optJSONObject("data") ?: return@runCatching payloadJson
         val item = JSONObject(rawItem.toString())
-        val highlightId = item.optString("highlightId")
-        val highlightCover = item.optString("highlightCover").trim().takeIf { it.isNotEmpty() }
-        val hasContentId = !item.optString("contentId").isNullOrBlank()
-        val hasMediaId = !item.optString("mediaId").isNullOrBlank()
-        val isHighlightOnly = highlightId.isNotBlank() && !hasContentId && !hasMediaId
         val folderId = item.optString("folderId").takeIf { it.isNotBlank() } ?: sourceWidgetId
         if (!folderId.isNullOrBlank() && item.optString("folderId").isNullOrBlank()) {
             item.put("folderId", folderId)
         }
+        // Keep click payload aligned with web/ios behavior: avoid mutating highlight payload shape.
         if (item.optString("layout").isNullOrBlank()) {
             val layoutFromSettings = item.optJSONObject("settings")?.optString("layout")
             if (!layoutFromSettings.isNullOrBlank()) {
@@ -766,72 +881,78 @@ private fun normalizeLightboxMessage(payloadJson: String, sourceWidgetId: String
             }
         }
 
-        if (isHighlightOnly && !highlightCover.isNullOrEmpty()) {
-            if (item.optString("thumbnailUrl").isNullOrBlank()) {
-                item.put("thumbnailUrl", highlightCover)
-            }
-            if (item.optString("mediaUrl").isNullOrBlank()) {
-                item.put("mediaUrl", highlightCover)
-            }
-            if (item.optString("mediaType").isNullOrBlank()) {
-                item.put("mediaType", "IMAGE")
-            }
-
-            val source = item.optJSONObject("source") ?: JSONObject()
-            if (source.optString("thumbnail").isNullOrBlank()) {
-                source.put("thumbnail", highlightCover)
-            }
-            item.put("source", source)
-
-            val mediaDetail = item.optJSONObject("mediaDetail") ?: JSONObject()
-            if (mediaDetail.optString("mediaUrl").isNullOrBlank()) {
-                mediaDetail.put("mediaUrl", highlightCover)
-            }
-            item.put("mediaDetail", mediaDetail)
-
-            val derivedMediaId = Regex("/([0-9]{8,})\\.[A-Za-z0-9]+(?:\\?|$)")
-                .find(highlightCover)
-                ?.groupValues
-                ?.getOrNull(1)
-            if (!derivedMediaId.isNullOrBlank() && item.optString("mediaId").isNullOrBlank()) {
-                item.put("mediaId", derivedMediaId)
-            }
-        }
-
         JSONObject()
             .put("eventType", "click")
             .put("item", item)
-            .put("data", item)
-            .put("media", item)
-            .put("folderId", item.optString("folderId"))
             .toString()
     }.getOrElse { payloadJson }
 }
 
 private fun buildDispatchMessageScript(messageJson: String): String {
+    val quotedPayload = JSONObject.quote(messageJson)
     return """
         (function() {
           try {
-            var data = $messageJson;
+            var raw = $quotedPayload;
+            var data = raw;
+            try { data = JSON.parse(raw); } catch (e) {}
             window.__tagnologyLastDispatchedMessage = data;
-            window.dispatchEvent(new MessageEvent('message', { data: data, origin: 'https://embed.tagnology.co' }));
+            try {
+              window.dispatchEvent(new MessageEvent('message', {
+                data: data,
+                origin: 'https://embed.tagnology.co'
+              }));
+            } catch (e) {}
           } catch (e) {}
         })();
     """.trimIndent()
 }
 
-private fun hasValidLightboxClickPayload(payloadJson: String): Boolean {
+private fun isUndefinedLightboxUrl(url: String): Boolean {
+    val trimmed = url.trim()
+    if (trimmed.isEmpty()) return false
+    if (trimmed == "undefined" || trimmed == "/undefined") return true
+    return trimmed.endsWith("/undefined") || trimmed.contains("/undefined?")
+}
+
+private fun shouldOpenOutsideLightbox(url: String, hasGesture: Boolean): Boolean {
+    if (!hasGesture) return false
     return runCatching {
-        val root = JSONObject(payloadJson)
-        if (!root.optString("eventType").equals("click", ignoreCase = true)) {
-            return@runCatching false
-        }
-        val item = root.optJSONObject("item") ?: root.optJSONObject("data") ?: return@runCatching false
-        val hasContentId = !item.optString("contentId").isNullOrBlank()
-        val hasMediaId = !item.optString("mediaId").isNullOrBlank()
-        val hasHighlightId = !item.optString("highlightId").isNullOrBlank()
-        hasContentId || hasMediaId || hasHighlightId
+        val uri = Uri.parse(url)
+        val scheme = uri.scheme?.lowercase().orEmpty()
+        if (scheme !in setOf("http", "https", "mailto", "tel", "line", "intent")) return false
+        if (scheme == "mailto" || scheme == "tel" || scheme == "line" || scheme == "intent") return true
+        val host = uri.host?.lowercase().orEmpty()
+        if (host.isBlank()) return false
+        host != "embed.tagnology.co" && host != "www.embed.tagnology.co"
     }.getOrDefault(false)
+}
+
+private fun openExternalUrl(context: android.content.Context, url: String): Boolean {
+    return runCatching {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        true
+    }.getOrElse {
+        Log.e("EmbedSDK", "lightbox openExternalUrl fail url=$url err=${it.message}")
+        false
+    }
+}
+
+private fun canonicalizePageUrl(pageUrl: String): String {
+    return runCatching {
+        val uri = Uri.parse(pageUrl)
+        val scheme = uri.scheme.orEmpty()
+        val host = uri.host.orEmpty()
+        val path = uri.encodedPath.orEmpty()
+        if (scheme.isNotBlank() && host.isNotBlank()) {
+            "$scheme://$host$path"
+        } else {
+            pageUrl
+        }
+    }.getOrDefault(pageUrl)
 }
 
 private fun summarizeLightboxClickPayload(payloadJson: String?): String {
@@ -901,13 +1022,33 @@ private const val INJECT_EVENT_BRIDGE_JS = """
 
   window.__tagnologyNotifyEvent = notifyNative;
 
-  var originalPostMessage = window.postMessage;
-  window.postMessage = function(message, targetOrigin, transfer) {
-    notifyNative(message);
-    if (typeof originalPostMessage === 'function') {
-      return originalPostMessage.call(this, message, targetOrigin, transfer);
+  // Some pages call tagnologyEvent.postMessage/postEvent with plain objects.
+  // Android JavascriptInterface expects a String; force JSON serialization.
+  function wrapNativeBridgeMethod(name) {
+    try {
+      if (!window.tagnologyEvent || typeof window.tagnologyEvent[name] !== 'function') return;
+      var original = window.tagnologyEvent[name];
+      if (original.__tagnologyWrapped) return;
+      var wrapped = function(payload) {
+        try {
+          var normalized = payload;
+          if (typeof payload !== 'string') {
+            normalized = JSON.stringify(payload || {});
+          }
+          return original.call(window.tagnologyEvent, normalized);
+        } catch (e) {
+          return original.call(window.tagnologyEvent, String(payload));
+        }
+      };
+      wrapped.__tagnologyWrapped = true;
+      window.tagnologyEvent[name] = wrapped;
+    } catch (e) {
+      // ignore
     }
-  };
+  }
+
+  wrapNativeBridgeMethod('postEvent');
+  wrapNativeBridgeMethod('postMessage');
 
   window.addEventListener('message', function(event) {
     if (event && event.data) {
@@ -1213,6 +1354,120 @@ private const val INJECT_LIGHTBOX_CSS_ONLY_JS = """
     }
   `;
   (document.head || document.documentElement).appendChild(style);
+})();
+"""
+
+private const val INJECT_LIGHTBOX_OBSERVABILITY_JS = """
+(function() {
+  if (window.__tagnologyAndroidLbObsInjected) return;
+  window.__tagnologyAndroidLbObsInjected = true;
+
+  function log(name, payload) {
+    try {
+      console.log('[Tagnology][LBOBS] ' + name + ' ' + JSON.stringify(payload || {}));
+    } catch (e) {
+      console.log('[Tagnology][LBOBS] ' + name);
+    }
+  }
+
+  function attachMedia(media) {
+    if (!media || media.__lbObsAttached) return;
+    media.__lbObsAttached = true;
+    var tag = (media.tagName || '').toLowerCase();
+    var src = media.currentSrc || media.src || '';
+    log('media_attach', { tag: tag, src: src, muted: media.muted, volume: media.volume });
+    media.addEventListener('volumechange', function() {
+      log('volume_change', { muted: media.muted, volume: media.volume, src: media.currentSrc || media.src || '' });
+    });
+    media.addEventListener('ended', function() {
+      log('media_ended', { tag: tag, src: media.currentSrc || media.src || '' });
+    });
+    media.addEventListener('play', function() {
+      log('media_play', { tag: tag, src: media.currentSrc || media.src || '' });
+    });
+  }
+
+  function scanMedia() {
+    var medias = document.querySelectorAll('video, img');
+    for (var i = 0; i < medias.length; i += 1) {
+      attachMedia(medias[i]);
+    }
+  }
+
+  var lastPrimary = '';
+  function observePrimaryMediaChange() {
+    var video = document.querySelector('video');
+    var img = document.querySelector('img');
+    var current = '';
+    if (video) {
+      current = 'video:' + (video.currentSrc || video.src || '');
+    } else if (img) {
+      current = 'img:' + (img.currentSrc || img.src || '');
+    }
+    if (current && current !== lastPrimary) {
+      lastPrimary = current;
+      log('primary_media_changed', { media: current });
+    }
+  }
+
+  var mo = new MutationObserver(function() {
+    scanMedia();
+    observePrimaryMediaChange();
+  });
+  mo.observe(document.documentElement || document, { childList: true, subtree: true, attributes: true });
+
+  window.addEventListener('message', function(event) {
+    var data = event && event.data ? event.data : null;
+    if (!data || typeof data !== 'object') return;
+    if (!data.eventType) return;
+    log('message_event', { eventType: data.eventType, open: data.open, index: data.index, mediaId: data.mediaId, contentId: data.contentId });
+  }, true);
+
+  scanMedia();
+  observePrimaryMediaChange();
+})();
+"""
+
+private const val INJECT_LIGHTBOX_CLOSE_GUARD_JS = """
+(function() {
+  if (window.__tagnologyCloseGuardInjected) return;
+  window.__tagnologyCloseGuardInjected = true;
+
+  function sendClose(reason) {
+    try {
+      if (window.__tagnologyNotifyEvent) {
+        window.__tagnologyNotifyEvent({ eventType: 'toggleLB', open: false, reason: reason || 'close_guard' });
+      } else if (window.tagnologyEvent && window.tagnologyEvent.postEvent) {
+        window.tagnologyEvent.postEvent(JSON.stringify({ eventType: 'toggleLB', open: false, reason: reason || 'close_guard' }));
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function isCloseLikeTarget(target) {
+    if (!target || !target.closest) return false;
+    var closeNode = target.closest(
+      '[aria-label*="close" i], [aria-label*="cancel" i], [title*="close" i], [title*="cancel" i], [class*="close" i], [id*="close" i], [data-testid*="close" i]'
+    );
+    return !!closeNode;
+  }
+
+  document.addEventListener('click', function(event) {
+    var t = event.target;
+    if (isCloseLikeTarget(t)) {
+      sendClose('close_element_click');
+      return;
+    }
+    var vw = window.innerWidth || 0;
+    var vh = window.innerHeight || 0;
+    var x = event.clientX || 0;
+    var y = event.clientY || 0;
+    // Fallback for X icon area: top-right corner only.
+    if (vw > 0 && vh > 0 && x >= vw * 0.82 && y <= Math.max(120, vh * 0.16)) {
+      sendClose('close_zone_click');
+    }
+  }, true);
 })();
 """
 
