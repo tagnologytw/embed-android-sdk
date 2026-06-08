@@ -1,0 +1,5 @@
+jdk:
+  - openjdk17
+
+install:
+  - ./gradlew :embed-android-sdk:assembleRelease --no-daemon
