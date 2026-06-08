@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,8 +36,33 @@ import co.tagnology.embed.sdk.EmbedWidgetItem
 import co.tagnology.embed.sdk.EmbedWidgetLoadError
 import co.tagnology.embed.sdk.EmbedWidgetView
 
+private enum class DemoScreen {
+    PRODUCT,
+    OTHER,
+}
+
 @Composable
 fun EcommerceDemoPage() {
+    var screen by remember { mutableStateOf(DemoScreen.PRODUCT) }
+    when (screen) {
+        DemoScreen.PRODUCT -> ProductDemoScreen(
+            onGoOtherPage = {
+                EmbedAndroidSDK.notifyPageDidLeave()
+                screen = DemoScreen.OTHER
+            }
+        )
+        DemoScreen.OTHER -> OtherDemoScreen(
+            onBackToProduct = {
+                screen = DemoScreen.PRODUCT
+            }
+        )
+    }
+}
+
+@Composable
+private fun ProductDemoScreen(
+    onGoOtherPage: () -> Unit,
+) {
     val pageUrl = "https://partnertest4.91app.com/SalePage/Index/8778110"
     val mid = "41458"
     val secret = "P5Sayl2krqbPV8ORsekcSDoWFUEiurKW2WMbm62b5Cs="
@@ -63,6 +89,12 @@ fun EcommerceDemoPage() {
         )
         initialized = error == null
     }
+    DisposableEffect(Unit) {
+        onDispose {
+            // Fallback for page leave tracking when composable is removed by navigation.
+            EmbedAndroidSDK.notifyPageDidLeave()
+        }
+    }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF4F5F7)) {
         Column(
@@ -73,6 +105,12 @@ fun EcommerceDemoPage() {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             HeaderCard()
+            SectionCard(
+                title = "DWELL_TIME 測試",
+                subtitle = "停留超過 5 秒後點下方按鈕，切頁時會呼叫 notifyPageDidLeave()"
+            ) {
+                Button(onClick = onGoOtherPage) { Text("前往其他頁面（結算停留時間）") }
+            }
             HeroSection()
 
             ProductSection()
@@ -125,6 +163,27 @@ fun EcommerceDemoPage() {
 
             CategoryListSection()
             Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun OtherDemoScreen(
+    onBackToProduct: () -> Unit,
+) {
+    Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF4F5F7)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            SectionCard(
+                title = "其他頁面",
+                subtitle = "你已離開商品頁。請在 Logcat 檢查 [EmbedAnalytics] DWELL_TIME。"
+            ) {
+                Button(onClick = onBackToProduct) { Text("返回商品頁") }
+            }
         }
     }
 }

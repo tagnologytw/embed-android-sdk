@@ -46,6 +46,59 @@ if (error == null) {
 }
 ```
 
+## Analytics 事件（對齊 iOS SDK）
+
+SDK 會送出 `POST {baseUrl}/widget/log`，事件如下：
+
+- `PAGE_VIEW`：`initialize` 成功且 `pageBundle` 非空時，單次 page session 送一次。
+- `EMBED_VIEW`：widget 在 viewport 內可見比例達門檻後送出（同一 folderId 去重）。
+- `DWELL_TIME`：離開頁面時計算並送出，包含 `dwellTime` 與 `widgetDwellTime`。
+
+注意事項：
+
+- `pageBundle` 為空時，會跳過 `PAGE_VIEW` / `EMBED_VIEW` / `DWELL_TIME`。
+- `DWELL_TIME` 只會在停留時間大於 5000ms 時送出。
+- 切換頁面時請額外呼叫 `notifyPageDidLeave`，確保停留時間正確結算。
+
+```kotlin
+override fun onPause() {
+    super.onPause()
+    EmbedAndroidSDK.notifyPageDidLeave()
+}
+```
+
+若你使用 Compose Navigation，建議在頁面離開時呼叫：
+
+```kotlin
+DisposableEffect(Unit) {
+    onDispose {
+        EmbedAndroidSDK.notifyPageDidLeave()
+    }
+}
+```
+
+### Widget 點擊 Callback（給 App 端自訂事件追蹤）
+
+`EmbedWidgetView` 支援 `onClick`，可讓 app 自行記錄 GA / Firebase / 自家追蹤：
+
+```kotlin
+EmbedWidgetView(
+    pageUrl = pageUrl,
+    position = EmbedAndroidSDK.BELOW_BUY_BUTTON,
+    onClick = { click ->
+        // click.folderId / click.folderName / click.position / click.mediaId / click.url
+    }
+)
+```
+
+欄位說明：
+
+- `folderId`：內容牆 folder id。
+- `folderName`：內容牆名稱。
+- `position`：版位（`EmbedPosition`）。
+- `mediaId`：被點擊素材 id（若 payload 無提供則為 `null`）。
+- `url`：點擊對應網址（無值時回退為目前 pageUrl）。
+
 ### Lightbox（Fullscreen）
 
 - `EmbedWidgetView` 預設 `enableLightbox = true`
