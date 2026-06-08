@@ -48,6 +48,13 @@ object EmbedAndroidSDK {
         lock.withLock {
             if (!forceRefresh && pageBundleCache.containsKey(pageUrl)) {
                 Log.d(TAG, "initialize skip hit cache pageUrl=$pageUrl")
+                val cachedWidgets = pageBundleCache[pageUrl].orEmpty()
+                EmbedAnalyticsTracker.beginPageIfNeeded(
+                    pageUrl = pageUrl,
+                    widgets = cachedWidgets,
+                    baseUrl = baseUrl,
+                    forceNewSession = forceRefresh,
+                )
                 return@withContext null
             }
         }
@@ -55,6 +62,12 @@ object EmbedAndroidSDK {
         mockPageBundle[pageUrl]?.let { mocked ->
             lock.withLock { pageBundleCache[pageUrl] = mocked }
             Log.d(TAG, "initialize use mock pageBundle size=${mocked.size} pageUrl=$pageUrl")
+            EmbedAnalyticsTracker.beginPageIfNeeded(
+                pageUrl = pageUrl,
+                widgets = mocked,
+                baseUrl = baseUrl,
+                forceNewSession = forceRefresh,
+            )
             return@withContext null
         }
 
@@ -70,6 +83,12 @@ object EmbedAndroidSDK {
             val widgets = result.getOrDefault(emptyList())
             lock.withLock { pageBundleCache[pageUrl] = widgets }
             Log.d(TAG, "initialize success api pageBundle size=${widgets.size} pageUrl=$pageUrl")
+            EmbedAnalyticsTracker.beginPageIfNeeded(
+                pageUrl = pageUrl,
+                widgets = widgets,
+                baseUrl = baseUrl,
+                forceNewSession = forceRefresh,
+            )
             null
         } else {
             EmbedWidgetLoadError(
@@ -105,6 +124,10 @@ object EmbedAndroidSDK {
         lock.withLock {
             if (pageUrl == null) pageBundleCache.clear() else pageBundleCache.remove(pageUrl)
         }
+    }
+
+    fun notifyPageDidLeave(baseUrl: String = DEFAULT_BASE_URL) {
+        EmbedAnalyticsTracker.endPageIfNeeded(baseUrl = baseUrl)
     }
 
     fun setMockPageBundle(pageUrl: String, widgets: List<EmbedWidgetItem>) {

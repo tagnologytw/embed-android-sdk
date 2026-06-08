@@ -35,7 +35,10 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -43,6 +46,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONObject
+import kotlin.math.max
+import kotlin.math.min
 
 @Composable
 @SuppressLint("SetJavaScriptEnabled")
@@ -58,11 +63,16 @@ fun EmbedWidgetView(
     val tag = "EmbedSDK"
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val canonicalPage = remember(pageUrl) { canonicalizePageUrl(pageUrl) }
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
     var widgets by remember(pageUrl, position) { mutableStateOf<List<EmbedWidgetItem>>(emptyList()) }
     var showLightbox by remember { mutableStateOf(false) }
     var lightboxMessageJson by remember { mutableStateOf<String?>(null) }
     var lastEventJson by remember { mutableStateOf<String?>(null) }
     var lastEventAtMs by remember { mutableStateOf(0L) }
+    val widgetsById = remember(widgets) { widgets.associateBy { it.folderId } }
 
     fun logLightbox(message: String) {
         Log.d(tag, "lightbox $message")
@@ -79,8 +89,16 @@ fun EmbedWidgetView(
 
         val eventType = parseEventType(eventJson)
         onEvent?.invoke(EmbedWidgetEvent(type = eventType, payloadJson = eventJson))
-        Log.d(tag, "event type=$eventType payload=$eventJson")
         logLightbox("receive eventType=$eventType sourceWidgetId=$sourceWidgetId")
+        if (eventType.equals("click", ignoreCase = true)) {
+            parseClickEvent(
+                payloadJson = eventJson,
+                sourceWidgetId = sourceWidgetId,
+                fallbackPosition = position,
+                fallbackPageUrl = pageUrl,
+                widgetsById = widgetsById,
+            )?.let { click -> onClick?.invoke(click) }
+        }
 
         if (!enableLightbox || DEBUG_DISABLE_LIGHTBOX) return
         if (shouldOpenLightbox(eventJson)) {
@@ -133,14 +151,31 @@ fun EmbedWidgetView(
     Column(modifier = modifier.fillMaxWidth()) {
         widgets.forEach { widget ->
             val context = LocalContext.current
-            val density = LocalDensity.current
             key(widget.folderId) {
                 var webViewHeightPx by remember(widget.folderId) { mutableStateOf(1) }
+                var hasTrackedEmbedView by remember(widget.folderId, pageUrl) { mutableStateOf(false) }
 
                 AndroidView(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(with(density) { webViewHeightPx.toDp() }),
+                        .height(with(density) { webViewHeightPx.toDp() })
+                        .onGloballyPositioned { coordinates ->
+                            if (hasTrackedEmbedView) return@onGloballyPositioned
+                            val bounds = coordinates.boundsInWindow()
+                            val width = bounds.width
+                            val height = bounds.height
+                            if (width <= 0f || height <= 0f) return@onGloballyPositioned
+
+                            val visibleWidth = (min(bounds.right, screenWidthPx) - max(bounds.left, 0f)).coerceAtLeast(0f)
+                            val visibleHeight = (min(bounds.bottom, screenHeightPx) - max(bounds.top, 0f)).coerceAtLeast(0f)
+                            if (visibleWidth <= 0f || visibleHeight <= 0f) return@onGloballyPositioned
+
+                            val visibleRatio = (visibleWidth * visibleHeight) / (width * height)
+                            if (visibleRatio >= 0.3f) {
+                                val tracked = EmbedAnalyticsTracker.markWidgetVisible(widget = widget)
+                                if (tracked) hasTrackedEmbedView = true
+                            }
+                        },
                     factory = {
                         Log.d(tag, "webview create widget=${widget.folderId} slot=${widget.position}")
                         val resizeBridge = object {
@@ -805,6 +840,56 @@ private fun parseEventType(payloadJson: String): String {
             else -> "unknown"
         }
     }
+}
+
+private fun parseClickEvent(
+    payloadJson: String,
+    sourceWidgetId: String?,
+    fallbackPosition: EmbedPosition,
+    fallbackPageUrl: String,
+    widgetsById: Map<String, EmbedWidgetItem>,
+): EmbedWidgetClick? {
+    return runCatching {
+        val root = JSONObject(payloadJson)
+        if (!extractEventType(root).equals("click", ignoreCase = true)) return@runCatching null
+        val item = root.optJSONObject("item") ?: root.optJSONObject("data") ?: return@runCatching null
+
+        val folderId = extractString(item, "folderId")
+            ?: sourceWidgetId
+            ?: return@runCatching null
+        val widget = widgetsById[folderId]
+
+        val position = extractPosition(item) ?: widget?.position ?: fallbackPosition
+        val folderName = extractString(item, "folderName") ?: widget?.folderName.orEmpty()
+        val mediaId = extractString(item, "mediaId", "mediaID", "media_id")
+        val url = extractString(item, "url", "productUrl", "clickUrl", "href")
+            ?: widget?.clickUrl
+            ?: fallbackPageUrl
+
+        EmbedWidgetClick(
+            folderId = folderId,
+            folderName = folderName,
+            position = position,
+            mediaId = mediaId,
+            url = url,
+        )
+    }.getOrNull()
+}
+
+private fun extractPosition(json: JSONObject): EmbedPosition? {
+    val value = extractString(json, "embedLocation", "position", "slot")
+    return runCatching { EmbedPosition.valueOf(value ?: return null) }.getOrNull()
+}
+
+private fun extractString(json: JSONObject, vararg keys: String): String? {
+    keys.forEach { key ->
+        val value = json.opt(key) ?: return@forEach
+        when (value) {
+            is String -> if (value.isNotBlank()) return value
+            is Number -> return value.toString()
+        }
+    }
+    return null
 }
 
 private fun extractEventType(json: JSONObject): String {
