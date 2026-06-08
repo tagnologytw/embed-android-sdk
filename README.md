@@ -18,6 +18,35 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 - `embed-android-sdk/`：SDK module
 - `demo/`：示範 App
 
+## JitPack 發版
+
+本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
+
+### 發版步驟（v1.0.0）
+
+```bash
+git checkout main
+git pull --ff-only origin main
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+到 JitPack 確認建置：
+
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.0`
+
+### 使用方式
+
+```kotlin
+// settings.gradle(.kts) / project repositories
+maven { url = uri("https://jitpack.io") }
+```
+
+```kotlin
+// app module dependency
+implementation("com.github.tagnologytw.embed-android-sdk:embed-android-sdk:v1.0.0")
+```
+
 ## 使用方式（SDK）
 
 - initialize 會呼叫：`POST {baseUrl}/widget/pageBundle`
