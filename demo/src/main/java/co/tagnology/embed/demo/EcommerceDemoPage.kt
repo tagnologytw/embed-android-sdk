@@ -1,5 +1,6 @@
 package co.tagnology.embed.demo
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import co.tagnology.embed.sdk.EmbedAndroidSDK
 import co.tagnology.embed.sdk.EmbedPosition
+import co.tagnology.embed.sdk.EmbedWidgetClick
+import co.tagnology.embed.sdk.EmbedWidgetEvent
 import co.tagnology.embed.sdk.EmbedWidgetItem
 import co.tagnology.embed.sdk.EmbedWidgetLoadError
 import co.tagnology.embed.sdk.EmbedWidgetView
@@ -73,6 +76,21 @@ private fun ProductDemoScreen(
     var showBelowMainProductInfo by remember { mutableStateOf(true) }
     var showAboveRecommendation by remember { mutableStateOf(true) }
     var showAboveFilter by remember { mutableStateOf(true) }
+    val widgetModifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 12.dp)
+    val onWidgetClick: (EmbedWidgetClick) -> Unit = { click ->
+        Log.d(
+            "EmbedDemo",
+            "[onClick] folderId=${click.folderId} folderName=${click.folderName} position=${click.position} mediaId=${click.mediaId} url=${click.url}"
+        )
+    }
+    val onWidgetEvent: (EmbedWidgetEvent) -> Unit = { event ->
+        Log.d(
+            "EmbedDemo",
+            "[onEvent] type=${event.type} payload=${event.payloadJson}"
+        )
+    }
 
     LaunchedEffect(Unit) {
         if (useMockData) {
@@ -119,9 +137,12 @@ private fun ProductDemoScreen(
                 EmbedWidgetView(
                     pageUrl = pageUrl,
                     position = EmbedAndroidSDK.BELOW_BUY_BUTTON,
+                    modifier = widgetModifier,
                     onError = { err ->
                         showBelowBuyButton = handleError(err, EmbedPosition.BELOW_BUY_BUTTON)
                     },
+                    onClick = onWidgetClick,
+                    onEvent = onWidgetEvent,
                 )
             }
 
@@ -131,9 +152,12 @@ private fun ProductDemoScreen(
                 EmbedWidgetView(
                     pageUrl = pageUrl,
                     position = EmbedAndroidSDK.BELOW_MAIN_PRODUCT_INFO,
+                    modifier = widgetModifier,
                     onError = { err ->
                         showBelowMainProductInfo = handleError(err, EmbedPosition.BELOW_MAIN_PRODUCT_INFO)
                     },
+                    onClick = onWidgetClick,
+                    onEvent = onWidgetEvent,
                 )
             }
 
@@ -141,9 +165,12 @@ private fun ProductDemoScreen(
                 EmbedWidgetView(
                     pageUrl = pageUrl,
                     position = EmbedAndroidSDK.ABOVE_RECOMMENDATION,
+                    modifier = widgetModifier,
                     onError = { err ->
                         showAboveRecommendation = handleError(err, EmbedPosition.ABOVE_RECOMMENDATION)
                     },
+                    onClick = onWidgetClick,
+                    onEvent = onWidgetEvent,
                 )
             }
 
@@ -155,9 +182,12 @@ private fun ProductDemoScreen(
                 EmbedWidgetView(
                     pageUrl = pageUrl,
                     position = EmbedAndroidSDK.ABOVE_FILTER,
+                    modifier = widgetModifier,
                     onError = { err ->
                         showAboveFilter = handleError(err, EmbedPosition.ABOVE_FILTER)
                     },
+                    onClick = onWidgetClick,
+                    onEvent = onWidgetEvent,
                 )
             }
 

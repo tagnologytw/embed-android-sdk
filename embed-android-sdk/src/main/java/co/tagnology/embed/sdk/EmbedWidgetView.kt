@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -215,6 +216,13 @@ fun EmbedWidgetView(
                             settings.loadsImagesAutomatically = true
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                             settings.mediaPlaybackRequiresUserGesture = true
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            settings.allowFileAccessFromFileURLs = false
+                            settings.allowUniversalAccessFromFileURLs = false
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                settings.safeBrowsingEnabled = true
+                            }
                             setBackgroundColor(android.graphics.Color.TRANSPARENT)
                             isVerticalScrollBarEnabled = false
                             isHorizontalScrollBarEnabled = false
@@ -411,6 +419,13 @@ private fun LightboxOverlayHost(
             settings.loadsImagesAutomatically = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             settings.mediaPlaybackRequiresUserGesture = false
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.allowFileAccessFromFileURLs = false
+            settings.allowUniversalAccessFromFileURLs = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                settings.safeBrowsingEnabled = true
+            }
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage): Boolean {
                     val level = consoleMessage.messageLevel().name

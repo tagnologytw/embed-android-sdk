@@ -4,6 +4,7 @@
     <application
         android:allowBackup="true"
         android:label="Embed SDK Demo"
+        android:usesCleartextTraffic="false"
         android:supportsRtl="true"
         android:theme="@style/Theme.EmbedDemo">
         <activity
