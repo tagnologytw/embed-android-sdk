@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -42,6 +43,7 @@ import co.tagnology.embed.sdk.EmbedWidgetView
 private enum class DemoScreen {
     PRODUCT,
     OTHER,
+    FLOATING,
 }
 
 @Composable
@@ -52,10 +54,20 @@ fun EcommerceDemoPage() {
             onGoOtherPage = {
                 EmbedAndroidSDK.notifyPageDidLeave()
                 screen = DemoScreen.OTHER
-            }
+            },
+            onGoFloatingPage = {
+                EmbedAndroidSDK.notifyPageDidLeave()
+                screen = DemoScreen.FLOATING
+            },
         )
         DemoScreen.OTHER -> OtherDemoScreen(
             onBackToProduct = {
+                screen = DemoScreen.PRODUCT
+            }
+        )
+        DemoScreen.FLOATING -> FloatingMediaDemoScreen(
+            onBackToProduct = {
+                EmbedAndroidSDK.notifyPageDidLeave()
                 screen = DemoScreen.PRODUCT
             }
         )
@@ -65,6 +77,7 @@ fun EcommerceDemoPage() {
 @Composable
 private fun ProductDemoScreen(
     onGoOtherPage: () -> Unit,
+    onGoFloatingPage: () -> Unit,
 ) {
     val pageUrl = "https://partnertest4.91app.com/SalePage/Index/8778110"
     val mid = "41458"
@@ -128,6 +141,12 @@ private fun ProductDemoScreen(
                 subtitle = "停留超過 5 秒後點下方按鈕，切頁時會呼叫 notifyPageDidLeave()"
             ) {
                 Button(onClick = onGoOtherPage) { Text("前往其他頁面（結算停留時間）") }
+            }
+            SectionCard(
+                title = "浮窗影音測試",
+                subtitle = "FIXED_* 固定版位，以覆蓋層顯示 FloatingMedia widget"
+            ) {
+                Button(onClick = onGoFloatingPage) { Text("前往浮窗影音展示頁") }
             }
             HeroSection()
 
@@ -218,6 +237,105 @@ private fun OtherDemoScreen(
     }
 }
 
+@Composable
+private fun FloatingMediaDemoScreen(
+    onBackToProduct: () -> Unit,
+) {
+    // 此頁面在後台設定了螢幕右下角的浮窗影音
+    val pageUrl = "https://partnertest4.91app.com/SalePage/Index/9323727"
+    val mid = "41458"
+    val secret = "P5Sayl2krqbPV8ORsekcSDoWFUEiurKW2WMbm62b5Cs="
+
+    var initialized by remember { mutableStateOf(false) }
+    var initMessage by remember { mutableStateOf("初始化中…") }
+    val fixedPositions = remember {
+        listOf(
+            EmbedAndroidSDK.FIXED_TOP_LEFT to Alignment.TopStart,
+            EmbedAndroidSDK.FIXED_TOP_RIGHT to Alignment.TopEnd,
+            EmbedAndroidSDK.FIXED_CENTER_LEFT to Alignment.CenterStart,
+            EmbedAndroidSDK.FIXED_CENTER_RIGHT to Alignment.CenterEnd,
+            EmbedAndroidSDK.FIXED_BOTTOM_LEFT to Alignment.BottomStart,
+            EmbedAndroidSDK.FIXED_BOTTOM_RIGHT to Alignment.BottomEnd,
+        )
+    }
+    var visiblePositions by remember { mutableStateOf(setOf<EmbedPosition>()) }
+
+    LaunchedEffect(Unit) {
+        val error = EmbedAndroidSDK.initialize(
+            pageUrl = pageUrl,
+            mid = mid,
+            secret = secret,
+            forceRefresh = true,
+        )
+        if (error == null) {
+            initialized = true
+            initMessage = "初始化成功，無資料的版位會自動隱藏"
+            visiblePositions = fixedPositions.map { it.first }.toSet()
+        } else {
+            initMessage = "初始化失敗 statusCode=${error.statusCode} message=${error.message}"
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            EmbedAndroidSDK.notifyPageDidLeave()
+        }
+    }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF4F5F7)) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                SectionCard(
+                    title = "浮窗影音展示頁",
+                    subtitle = "頁面：SalePage/Index/9323727\n$initMessage"
+                ) {
+                    Button(onClick = onBackToProduct) { Text("返回商品頁") }
+                }
+                HeroSection()
+                ProductSection()
+                DetailSection()
+                Spacer(modifier = Modifier.height(400.dp))
+            }
+
+            if (initialized) {
+                fixedPositions.forEach { (position, alignment) ->
+                    if (position in visiblePositions) {
+                        EmbedWidgetView(
+                            pageUrl = pageUrl,
+                            position = position,
+                            modifier = Modifier
+                                .align(alignment)
+                                .padding(16.dp)
+                                .width(126.dp)
+                                .height(224.dp),
+                            onError = { err ->
+                                Log.d(
+                                    "EmbedDemo",
+                                    "[floating onError] position=$position statusCode=${err.statusCode} message=${err.message}"
+                                )
+                                if (err.position == position && err.statusCode != 425 && err.statusCode != 428) {
+                                    visiblePositions = visiblePositions - position
+                                }
+                            },
+                            onClick = { click ->
+                                Log.d(
+                                    "EmbedDemo",
+                                    "[floating onClick] folderId=${click.folderId} position=${click.position} url=${click.url}"
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun handleError(error: EmbedWidgetLoadError, expectedPosition: EmbedPosition): Boolean {
     if (error.position != expectedPosition) return true
     return error.statusCode == 425 || error.statusCode == 428
@@ -225,7 +343,7 @@ private fun handleError(error: EmbedWidgetLoadError, expectedPosition: EmbedPosi
 
 @Composable
 private fun HeaderCard() {
-    SectionCard(title = "EC Test Demo", subtitle = "Android SDK 版位展示（不含浮窗影音）")
+    SectionCard(title = "EC Test Demo", subtitle = "Android SDK 版位展示")
 }
 
 @Composable

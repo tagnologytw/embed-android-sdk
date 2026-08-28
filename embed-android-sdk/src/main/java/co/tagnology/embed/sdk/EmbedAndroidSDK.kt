@@ -17,6 +17,14 @@ object EmbedAndroidSDK {
     val ABOVE_RECOMMENDATION = EmbedPosition.ABOVE_RECOMMENDATION
     val ABOVE_FILTER = EmbedPosition.ABOVE_FILTER
 
+    // 浮窗影音固定版位
+    val FIXED_BOTTOM_LEFT = EmbedPosition.FIXED_BOTTOM_LEFT
+    val FIXED_BOTTOM_RIGHT = EmbedPosition.FIXED_BOTTOM_RIGHT
+    val FIXED_TOP_LEFT = EmbedPosition.FIXED_TOP_LEFT
+    val FIXED_TOP_RIGHT = EmbedPosition.FIXED_TOP_RIGHT
+    val FIXED_CENTER_LEFT = EmbedPosition.FIXED_CENTER_LEFT
+    val FIXED_CENTER_RIGHT = EmbedPosition.FIXED_CENTER_RIGHT
+
     private val lock = Mutex()
     private val pageBundleCache = mutableMapOf<String, List<EmbedWidgetItem>>()
     private val mockPageBundle = mutableMapOf<String, List<EmbedWidgetItem>>()
@@ -109,8 +117,18 @@ object EmbedAndroidSDK {
             return@withContext Result.failure(IllegalStateException("尚未 initialize，statusCode=428"))
         }
 
-        val byPosition = widgets.filter { it.position == position }
-        val filtered = byPosition.filterNot { it.layout.equals("floatingmedia", ignoreCase = true) }
+        // Mirrors the iOS SDK's filterWidgetsByPosition: FIXED_* positions return
+        // only FloatingMedia widgets pinned there; regular positions exclude
+        // FloatingMedia (its embedLocation field is unrelated to where it floats).
+        val isFixedPosition = position.floatingMediaPositionValue() != null
+        val filtered = if (isFixedPosition) {
+            widgets.filter {
+                it.layout.equals("floatingmedia", ignoreCase = true) && it.position == position
+            }
+        } else {
+            widgets.filter { it.position == position }
+                .filterNot { it.layout.equals("floatingmedia", ignoreCase = true) }
+        }
         if (filtered.isEmpty()) {
             Log.w(TAG, "getWidgets empty status=204 pageUrl=$pageUrl position=$position")
             return@withContext Result.failure(NoSuchElementException("該版位無資料，statusCode=204"))
