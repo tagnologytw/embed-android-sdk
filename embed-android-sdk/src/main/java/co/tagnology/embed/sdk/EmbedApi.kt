@@ -71,19 +71,33 @@ internal object EmbedApi {
             val mediaId = item.optString("mediaId").ifBlank { null }
             val layout = item.optString("layout").ifBlank { null }
 
-            val position = runCatching { EmbedPosition.valueOf(embedLocation) }.getOrNull() ?: continue
             if (folderId.isBlank()) continue
-            if (layout.equals("floatingmedia", ignoreCase = true)) {
-                Log.d(
-                    TAG,
-                    "pageBundle skip floatingMedia index=$i folderId=$folderId embedLocation=$embedLocation folderName=$folderName"
-                )
-                continue
+
+            val isFloatingMedia = layout.equals("floatingmedia", ignoreCase = true)
+            // FloatingMedia carries its position in "floatingMediaPosition" (top-level,
+            // falling back to setting.floatingMediaPosition), not in embedLocation.
+            val floatingMediaPosition = if (isFloatingMedia) {
+                item.optString("floatingMediaPosition").ifBlank { null }
+                    ?: item.optJSONObject("setting")?.optString("floatingMediaPosition")?.ifBlank { null }
+            } else {
+                null
+            }
+
+            val position = if (isFloatingMedia) {
+                embedPositionForFloatingMediaPosition(floatingMediaPosition) ?: run {
+                    Log.w(
+                        TAG,
+                        "pageBundle skip floatingMedia index=$i folderId=$folderId unknown floatingMediaPosition=$floatingMediaPosition"
+                    )
+                    null
+                } ?: continue
+            } else {
+                runCatching { EmbedPosition.valueOf(embedLocation) }.getOrNull() ?: continue
             }
 
             Log.d(
                 TAG,
-                "pageBundle item index=$i folderId=$folderId layout=${layout ?: "null"} embedLocation=$embedLocation folderName=$folderName"
+                "pageBundle item index=$i folderId=$folderId layout=${layout ?: "null"} embedLocation=$embedLocation floatingMediaPosition=${floatingMediaPosition ?: "null"} folderName=$folderName"
             )
 
             widgets += EmbedWidgetItem(
@@ -94,6 +108,7 @@ internal object EmbedApi {
                 layout = layout,
                 clickUrl = clickUrl,
                 mediaId = mediaId,
+                floatingMediaPosition = floatingMediaPosition,
             )
         }
 

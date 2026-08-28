@@ -153,7 +153,12 @@ fun EmbedWidgetView(
         widgets.forEach { widget ->
             val context = LocalContext.current
             key(widget.folderId) {
-                var webViewHeightPx by remember(widget.folderId) { mutableStateOf(1) }
+                val isFloatingMedia = widget.layout.equals("floatingmedia", ignoreCase = true)
+                // FloatingMedia 強制使用 224 高度（與 iOS 相同），並忽略 resize 回報
+                val floatingMediaHeightPx = with(density) { 224.dp.roundToPx() }
+                var webViewHeightPx by remember(widget.folderId) {
+                    mutableStateOf(if (isFloatingMedia) floatingMediaHeightPx else 1)
+                }
                 var hasTrackedEmbedView by remember(widget.folderId, pageUrl) { mutableStateOf(false) }
 
                 AndroidView(
@@ -182,6 +187,7 @@ fun EmbedWidgetView(
                         val resizeBridge = object {
                             @JavascriptInterface
                             fun postHeight(height: Float) {
+                                if (isFloatingMedia) return
                                 mainHandler.post {
                                     // JS reports CSS px; convert to Android px.
                                     val pixelDensity = context.resources.displayMetrics.density
@@ -506,6 +512,7 @@ private fun LightboxOverlayHost(
                     isLightboxReady = false
                     Log.d(tag, "lightbox started url=$url")
                     evaluateJavascript(INJECT_EVENT_BRIDGE_JS, null)
+                    evaluateJavascript(INJECT_HIDE_MEDIA_PLACEHOLDER_JS, null)
                     if (DEBUG_LIGHTBOX_FORCE_LAYOUT_FIX) {
                         evaluateJavascript(INJECT_LIGHTBOX_DEBUG_JS, null)
                     }
@@ -516,6 +523,7 @@ private fun LightboxOverlayHost(
                     isContentLoaded = true
                     Log.d(tag, "lightbox finished url=$url")
                     evaluateJavascript(INJECT_EVENT_BRIDGE_JS, null)
+                    evaluateJavascript(INJECT_HIDE_MEDIA_PLACEHOLDER_JS, null)
                     evaluateJavascript(INJECT_LIGHTBOX_CLOSE_GUARD_JS, null)
                     if (DEBUG_LIGHTBOX_FORCE_LAYOUT_FIX) {
                         evaluateJavascript(INJECT_LIGHTBOX_OBSERVABILITY_JS, null)
@@ -1155,6 +1163,64 @@ private const val INJECT_EVENT_BRIDGE_JS = """
       notifyNative(event.data);
     }
   });
+})();
+"""
+
+// Android WebView (Chromium) paints a gray full-size default play-button
+// artwork over <video> elements that have no poster and no decoded frame yet
+// (it is compositor-drawn, so CSS on the media-controls pseudo-elements cannot
+// hide it). iOS WKWebView shows plain black there. Keep such videos invisible
+// until their first frame is decodable so the wait state matches iOS.
+private const val INJECT_HIDE_MEDIA_PLACEHOLDER_JS = """
+(function() {
+  if (window.__tagnologyPosterGuardInjected) return;
+  window.__tagnologyPosterGuardInjected = true;
+
+  function guard(video) {
+    if (video.__tagnologyPosterGuard) return;
+    video.__tagnologyPosterGuard = true;
+
+    var hidden = false;
+    function hideIfNoFrame() {
+      // readyState >= HAVE_CURRENT_DATA(2) means a frame is available.
+      if (!video.poster && video.readyState < 2) {
+        hidden = true;
+        video.style.setProperty('opacity', '0', 'important');
+      }
+    }
+    function restore() {
+      if (!hidden) return;
+      hidden = false;
+      video.style.removeProperty('opacity');
+    }
+
+    hideIfNoFrame();
+    ['loadeddata', 'playing', 'timeupdate', 'error'].forEach(function (name) {
+      video.addEventListener(name, restore);
+    });
+    // Safety net: never leave a video permanently invisible.
+    setTimeout(restore, 8000);
+  }
+
+  function scan(root) {
+    if (!root || !root.querySelectorAll) return;
+    var videos = root.querySelectorAll('video');
+    for (var i = 0; i < videos.length; i += 1) guard(videos[i]);
+  }
+
+  scan(document);
+  new MutationObserver(function (mutations) {
+    for (var i = 0; i < mutations.length; i += 1) {
+      var added = mutations[i].addedNodes;
+      for (var j = 0; j < added.length; j += 1) {
+        var node = added[j];
+        if (node && node.nodeType === 1) {
+          if (node.tagName === 'VIDEO') guard(node);
+          else scan(node);
+        }
+      }
+    }
+  }).observe(document.documentElement || document, { childList: true, subtree: true });
 })();
 """
 
