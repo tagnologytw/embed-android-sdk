@@ -146,16 +146,31 @@ object EmbedAndroidSDK {
         }
     }
 
-    private fun extractPageId(pageUrl: String): String? {
+    /**
+     * Extracts page ID from page URL using 91APP rules, mirroring the iOS SDK's
+     * extractPageIdFromPageUrl:
+     *  - /SalePage/Index/{id}   -> "{id}"
+     *  - /SalePageCategory/{id} -> "category_{id}"
+     * Path segment matching is case-insensitive.
+     */
+    internal fun extractPageId(pageUrl: String): String? {
         return runCatching {
-            val uri = URL(pageUrl)
-            val path = uri.path
+            val components = URL(pageUrl).path.split("/").filter { it.isNotEmpty() }
+            val lowercased = components.map { it.lowercase() }
 
-            val productRegex = Regex("/SalePage/Index/([0-9]+)")
-            val categoryRegex = Regex("/SalePageCategory/([0-9]+)")
+            val indexPosition = lowercased.indexOf("index")
+            if (indexPosition != -1 && indexPosition + 1 < components.size) {
+                return@runCatching components[indexPosition + 1]
+            }
 
-            productRegex.find(path)?.groupValues?.getOrNull(1)
-                ?: categoryRegex.find(path)?.groupValues?.getOrNull(1)
+            val categoryPosition = lowercased.indexOf("salepagecategory")
+            if (categoryPosition != -1 && categoryPosition + 1 < components.size) {
+                // Category pages must carry the "category_" prefix to match the web
+                // side's getPageInfo lookup key; a bare id returns an empty pageBundle.
+                return@runCatching "category_" + components[categoryPosition + 1]
+            }
+
+            null
         }.getOrNull()
     }
 }
