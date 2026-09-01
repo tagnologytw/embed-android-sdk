@@ -574,19 +574,25 @@ private fun LightboxOverlayHost(
             }
         )
         Log.d(tag, "lightbox apply statusBarOffsetPx=$statusBarOffsetPx")
-        root.addView(overlay)
+        val attachment = DeferredOverlayAttachment(
+            root = root,
+            overlay = overlay,
+            onDetached = {
+                // Runs in the same posted message as removeView, so the
+                // WebView is off the tree before it is destroyed.
+                webView.removeJavascriptInterface("tagnologyEvent")
+                webView.stopLoading()
+                webView.destroy()
+            },
+        )
+        attachment.attach()
         lightboxWebViewRef = webView
         overlayContainerRef = overlay
-        Log.d(tag, "lightbox overlay attached")
 
         onDispose {
-            Log.d(tag, "lightbox overlay detached")
             overlayContainerRef = null
             lightboxWebViewRef = null
-            root.removeView(overlay)
-            webView.removeJavascriptInterface("tagnologyEvent")
-            webView.stopLoading()
-            webView.destroy()
+            attachment.dispose()
         }
     }
 

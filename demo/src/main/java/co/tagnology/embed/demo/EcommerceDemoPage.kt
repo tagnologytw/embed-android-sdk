@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -128,6 +129,7 @@ private fun ProductDemoScreen(
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF4F5F7)) {
+        Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -213,6 +215,10 @@ private fun ProductDemoScreen(
             CategoryListSection()
             Spacer(modifier = Modifier.height(32.dp))
         }
+
+        // 商品頁本身也支援浮窗影音固定版位
+        FloatingMediaOverlays(pageUrl = pageUrl, initialized = initialized)
+        }
     }
 }
 
@@ -248,17 +254,6 @@ private fun FloatingMediaDemoScreen(
 
     var initialized by remember { mutableStateOf(false) }
     var initMessage by remember { mutableStateOf("初始化中…") }
-    val fixedPositions = remember {
-        listOf(
-            EmbedAndroidSDK.FIXED_TOP_LEFT to Alignment.TopStart,
-            EmbedAndroidSDK.FIXED_TOP_RIGHT to Alignment.TopEnd,
-            EmbedAndroidSDK.FIXED_CENTER_LEFT to Alignment.CenterStart,
-            EmbedAndroidSDK.FIXED_CENTER_RIGHT to Alignment.CenterEnd,
-            EmbedAndroidSDK.FIXED_BOTTOM_LEFT to Alignment.BottomStart,
-            EmbedAndroidSDK.FIXED_BOTTOM_RIGHT to Alignment.BottomEnd,
-        )
-    }
-    var visiblePositions by remember { mutableStateOf(setOf<EmbedPosition>()) }
 
     LaunchedEffect(Unit) {
         val error = EmbedAndroidSDK.initialize(
@@ -270,7 +265,6 @@ private fun FloatingMediaDemoScreen(
         if (error == null) {
             initialized = true
             initMessage = "初始化成功，無資料的版位會自動隱藏"
-            visiblePositions = fixedPositions.map { it.first }.toSet()
         } else {
             initMessage = "初始化失敗 statusCode=${error.statusCode} message=${error.message}"
         }
@@ -302,36 +296,62 @@ private fun FloatingMediaDemoScreen(
                 Spacer(modifier = Modifier.height(400.dp))
             }
 
-            if (initialized) {
-                fixedPositions.forEach { (position, alignment) ->
-                    if (position in visiblePositions) {
-                        EmbedWidgetView(
-                            pageUrl = pageUrl,
-                            position = position,
-                            modifier = Modifier
-                                .align(alignment)
-                                .padding(16.dp)
-                                .width(126.dp)
-                                .height(224.dp),
-                            onError = { err ->
-                                Log.d(
-                                    "EmbedDemo",
-                                    "[floating onError] position=$position statusCode=${err.statusCode} message=${err.message}"
-                                )
-                                if (err.position == position && err.statusCode != 425 && err.statusCode != 428) {
-                                    visiblePositions = visiblePositions - position
-                                }
-                            },
-                            onClick = { click ->
-                                Log.d(
-                                    "EmbedDemo",
-                                    "[floating onClick] folderId=${click.folderId} position=${click.position} url=${click.url}"
-                                )
-                            },
-                        )
+            FloatingMediaOverlays(pageUrl = pageUrl, initialized = initialized)
+        }
+    }
+}
+
+/**
+ * 浮窗影音覆蓋層：在六個 FIXED_* 對齊點各掛一個 126x224dp 的 EmbedWidgetView，
+ * 無資料（204）的版位自動隱藏。放在 fillMaxSize 的 Box 內使用。
+ */
+@Composable
+private fun BoxScope.FloatingMediaOverlays(
+    pageUrl: String,
+    initialized: Boolean,
+) {
+    val fixedPositions = remember {
+        listOf(
+            EmbedAndroidSDK.FIXED_TOP_LEFT to Alignment.TopStart,
+            EmbedAndroidSDK.FIXED_TOP_RIGHT to Alignment.TopEnd,
+            EmbedAndroidSDK.FIXED_CENTER_LEFT to Alignment.CenterStart,
+            EmbedAndroidSDK.FIXED_CENTER_RIGHT to Alignment.CenterEnd,
+            EmbedAndroidSDK.FIXED_BOTTOM_LEFT to Alignment.BottomStart,
+            EmbedAndroidSDK.FIXED_BOTTOM_RIGHT to Alignment.BottomEnd,
+        )
+    }
+    var visiblePositions by remember(pageUrl) { mutableStateOf(setOf<EmbedPosition>()) }
+    LaunchedEffect(pageUrl, initialized) {
+        if (initialized) visiblePositions = fixedPositions.map { it.first }.toSet()
+    }
+    if (!initialized) return
+
+    fixedPositions.forEach { (position, alignment) ->
+        if (position in visiblePositions) {
+            EmbedWidgetView(
+                pageUrl = pageUrl,
+                position = position,
+                modifier = Modifier
+                    .align(alignment)
+                    .padding(16.dp)
+                    .width(126.dp)
+                    .height(224.dp),
+                onError = { err ->
+                    Log.d(
+                        "EmbedDemo",
+                        "[floating onError] position=$position statusCode=${err.statusCode} message=${err.message}"
+                    )
+                    if (err.position == position && err.statusCode != 425 && err.statusCode != 428) {
+                        visiblePositions = visiblePositions - position
                     }
-                }
-            }
+                },
+                onClick = { click ->
+                    Log.d(
+                        "EmbedDemo",
+                        "[floating onClick] folderId=${click.folderId} position=${click.position} url=${click.url}"
+                    )
+                },
+            )
         }
     }
 }
