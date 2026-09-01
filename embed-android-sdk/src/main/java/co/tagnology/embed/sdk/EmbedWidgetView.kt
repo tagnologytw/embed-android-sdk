@@ -574,19 +574,36 @@ private fun LightboxOverlayHost(
             }
         )
         Log.d(tag, "lightbox apply statusBarOffsetPx=$statusBarOffsetPx")
-        root.addView(overlay)
+        // Composition and disposal can run inside a layout traversal (e.g. a
+        // RecyclerView recycling a ComposeView item during dispatchLayout).
+        // Mutating the DecorView's children while FrameLayout.layoutChildren
+        // is iterating them NPEs on a stale child index, so defer both attach
+        // and detach to a posted message that runs outside the traversal.
+        var disposed = false
+        val attachOverlay = Runnable {
+            if (disposed) return@Runnable
+            root.addView(overlay)
+            Log.d(tag, "lightbox overlay attached")
+        }
+        root.post(attachOverlay)
         lightboxWebViewRef = webView
         overlayContainerRef = overlay
-        Log.d(tag, "lightbox overlay attached")
 
         onDispose {
-            Log.d(tag, "lightbox overlay detached")
+            Log.d(tag, "lightbox overlay detach scheduled")
+            disposed = true
+            root.removeCallbacks(attachOverlay)
             overlayContainerRef = null
             lightboxWebViewRef = null
-            root.removeView(overlay)
-            webView.removeJavascriptInterface("tagnologyEvent")
-            webView.stopLoading()
-            webView.destroy()
+            root.post {
+                // removeView is a no-op if attachOverlay never ran; destroy the
+                // WebView in the same message so it is off the tree first.
+                root.removeView(overlay)
+                webView.removeJavascriptInterface("tagnologyEvent")
+                webView.stopLoading()
+                webView.destroy()
+                Log.d(tag, "lightbox overlay detached")
+            }
         }
     }
 
