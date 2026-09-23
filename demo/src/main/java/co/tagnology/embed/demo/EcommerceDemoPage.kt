@@ -45,6 +45,7 @@ private enum class DemoScreen {
     PRODUCT,
     OTHER,
     FLOATING,
+    RECYCLER,
 }
 
 @Composable
@@ -60,6 +61,10 @@ fun EcommerceDemoPage() {
                 EmbedAndroidSDK.notifyPageDidLeave()
                 screen = DemoScreen.FLOATING
             },
+            onGoRecyclerPage = {
+                EmbedAndroidSDK.notifyPageDidLeave()
+                screen = DemoScreen.RECYCLER
+            },
         )
         DemoScreen.OTHER -> OtherDemoScreen(
             onBackToProduct = {
@@ -72,6 +77,12 @@ fun EcommerceDemoPage() {
                 screen = DemoScreen.PRODUCT
             }
         )
+        DemoScreen.RECYCLER -> RecyclerViewDemoScreen(
+            onBackToProduct = {
+                EmbedAndroidSDK.notifyPageDidLeave()
+                screen = DemoScreen.PRODUCT
+            }
+        )
     }
 }
 
@@ -79,6 +90,7 @@ fun EcommerceDemoPage() {
 private fun ProductDemoScreen(
     onGoOtherPage: () -> Unit,
     onGoFloatingPage: () -> Unit,
+    onGoRecyclerPage: () -> Unit,
 ) {
     val pageUrl = "https://partnertest4.91app.com/SalePage/Index/8778110"
     val mid = "41458"
@@ -149,6 +161,12 @@ private fun ProductDemoScreen(
                 subtitle = "FIXED_* 固定版位，以覆蓋層顯示 FloatingMedia widget"
             ) {
                 Button(onClick = onGoFloatingPage) { Text("前往浮窗影音展示頁") }
+            }
+            SectionCard(
+                title = "RecyclerView 宿主測試",
+                subtitle = "模擬 91APP：ComposeView 放在 RecyclerView cell 內，驗證 lightbox 是否全螢幕"
+            ) {
+                Button(onClick = onGoRecyclerPage) { Text("前往 RecyclerView 測試頁") }
             }
             HeroSection()
 
@@ -247,8 +265,8 @@ private fun OtherDemoScreen(
 private fun FloatingMediaDemoScreen(
     onBackToProduct: () -> Unit,
 ) {
-    // 此頁面在後台設定了螢幕右下角的浮窗影音
-    val pageUrl = "https://partnertest4.91app.com/SalePage/Index/9323727"
+    // 此頁面在後台設定了右下角與左上角兩個浮窗影音
+    val pageUrl = "https://partnertest4.91app.com/SalePage/Index/8778040"
     val mid = "41458"
     val secret = "P5Sayl2krqbPV8ORsekcSDoWFUEiurKW2WMbm62b5Cs="
 
@@ -286,7 +304,7 @@ private fun FloatingMediaDemoScreen(
             ) {
                 SectionCard(
                     title = "浮窗影音展示頁",
-                    subtitle = "頁面：SalePage/Index/9323727\n$initMessage"
+                    subtitle = "頁面：SalePage/Index/8778040\n$initMessage"
                 ) {
                     Button(onClick = onBackToProduct) { Text("返回商品頁") }
                 }
@@ -351,6 +369,9 @@ private fun BoxScope.FloatingMediaOverlays(
                         "[floating onClick] folderId=${click.folderId} position=${click.position} url=${click.url}"
                     )
                 },
+                onEvent = { event ->
+                    Log.d("EmbedDemo", "[floating onEvent] position=$position type=${event.type} payload=${event.payloadJson}")
+                },
             )
         }
     }
@@ -367,7 +388,7 @@ private fun HeaderCard() {
 }
 
 @Composable
-private fun HeroSection() {
+internal fun HeroSection() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -380,7 +401,7 @@ private fun HeroSection() {
 }
 
 @Composable
-private fun ProductSection() {
+internal fun ProductSection() {
     SectionCard(title = "Crash Baggage 登機箱", subtitle = "指定色限時折扣") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PriceTag("NT$6,280")
@@ -392,7 +413,7 @@ private fun ProductSection() {
 }
 
 @Composable
-private fun DetailSection() {
+internal fun DetailSection() {
     SectionCard(title = "商品詳細資訊", subtitle = "航太級 PC 材質，360 度靜音輪，TSA 海關密碼鎖")
 }
 
@@ -412,7 +433,7 @@ private fun CategoryListSection() {
 }
 
 @Composable
-private fun SectionCard(
+internal fun SectionCard(
     title: String,
     subtitle: String,
     content: @Composable (() -> Unit)? = null,
@@ -435,7 +456,7 @@ private fun SectionCard(
 }
 
 @Composable
-private fun PriceTag(text: String, background: Color = Color(0xFFEFF6FF)) {
+internal fun PriceTag(text: String, background: Color = Color(0xFFEFF6FF)) {
     Box(
         modifier = Modifier
             .background(background, RoundedCornerShape(999.dp))

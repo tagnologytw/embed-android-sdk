@@ -154,7 +154,8 @@ fun EmbedWidgetView(
             val context = LocalContext.current
             key(widget.folderId) {
                 val isFloatingMedia = widget.layout.equals("floatingmedia", ignoreCase = true)
-                // FloatingMedia 強制使用 224 高度（與 iOS 相同），並忽略 resize 回報
+                // FloatingMedia 顯示時固定 224 高度（與 iOS 相同）；embed 自行隱藏（display:none）
+                // 時會回報高度 1，此時原生 WebView 也收成 1px，避免透明區塊攔截底下的觸控
                 val floatingMediaHeightPx = with(density) { 224.dp.roundToPx() }
                 var webViewHeightPx by remember(widget.folderId) {
                     mutableStateOf(if (isFloatingMedia) floatingMediaHeightPx else 1)
@@ -187,8 +188,19 @@ fun EmbedWidgetView(
                         val resizeBridge = object {
                             @JavascriptInterface
                             fun postHeight(height: Float) {
-                                if (isFloatingMedia) return
                                 mainHandler.post {
+                                    if (isFloatingMedia) {
+                                        val nextHeightPx = resolveFloatingMediaHeightPx(
+                                            reportedCssHeight = height,
+                                            expandedHeightPx = floatingMediaHeightPx,
+                                        )
+                                        if (nextHeightPx != webViewHeightPx) {
+                                            webViewHeightPx = nextHeightPx
+                                            val state = if (nextHeightPx == FLOATING_MEDIA_COLLAPSED_HEIGHT_PX) "collapsed" else "expanded"
+                                            Log.d(tag, "widget=${widget.folderId} slot=${widget.position} floating $state heightCss=$height heightPx=$webViewHeightPx")
+                                        }
+                                        return@post
+                                    }
                                     // JS reports CSS px; convert to Android px.
                                     val pixelDensity = context.resources.displayMetrics.density
                                     val nextHeightPx = (height * pixelDensity).toInt().coerceAtLeast(2)
@@ -245,6 +257,7 @@ fun EmbedWidgetView(
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
                                     Log.d(tag, "webview finished widget=${widget.folderId} slot=${widget.position}")
+                                    evaluateJavascript(INJECT_HIDE_MEDIA_PLACEHOLDER_JS, null)
                                     evaluateJavascript(INJECT_RESIZE_JS, null)
                                     postDelayed({ evaluateJavascript(REPORT_HEIGHT_JS, null) }, 50)
                                     postDelayed({ evaluateJavascript(REPORT_HEIGHT_JS, null) }, 300)
@@ -308,6 +321,24 @@ fun EmbedWidgetView(
     }
 }
 
+/** Height of a FloatingMedia WebView while the embed has hidden itself. */
+internal const val FLOATING_MEDIA_COLLAPSED_HEIGHT_PX = 1
+
+/**
+ * Native height policy for a FloatingMedia (浮窗影音) WebView.
+ *
+ * While the embed is visible the box is a fixed 126x224dp (matching iOS), so
+ * any real height report maps to [expandedHeightPx]. When the user closes the
+ * floating media the embed posts `resize {display:none}`; the wrapper page then
+ * measures the iframe at 0 and reports height <= 1. The native WebView must
+ * collapse too, otherwise a transparent 126x224dp WebView keeps swallowing
+ * touches on whatever the app draws underneath (91APP: the category page's
+ * filter / sort bar became untappable).
+ */
+internal fun resolveFloatingMediaHeightPx(reportedCssHeight: Float, expandedHeightPx: Int): Int {
+    return if (reportedCssHeight <= 1f) FLOATING_MEDIA_COLLAPSED_HEIGHT_PX else expandedHeightPx
+}
+
 // Temporary switch for debugging startup white overlay issue.
 private const val DEBUG_DISABLE_LIGHTBOX = false
 private const val DEBUG_LIGHTBOX_FORCE_LAYOUT_FIX = false
@@ -363,11 +394,10 @@ private fun LightboxOverlayHost(
     val hostView = LocalView.current
     val context = LocalContext.current
     DisposableEffect(canonicalPage) {
-        val root = hostView.rootView as? ViewGroup
-        if (root == null) {
-            return@DisposableEffect onDispose {}
-        }
-
+        // The overlay root (DecorView) is resolved by DeferredOverlayAttachment
+        // at attach time, once hostView is attached to a window. Resolving
+        // hostView.rootView here is wrong for a detached host (e.g. a recycled
+        // RecyclerView cell being re-bound): it yields the cell, not the window.
         val overlay = FrameLayout(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -575,7 +605,7 @@ private fun LightboxOverlayHost(
         )
         Log.d(tag, "lightbox apply statusBarOffsetPx=$statusBarOffsetPx")
         val attachment = DeferredOverlayAttachment(
-            root = root,
+            host = hostView,
             overlay = overlay,
             onDetached = {
                 // Runs in the same posted message as removeView, so the
@@ -1175,12 +1205,68 @@ private const val INJECT_EVENT_BRIDGE_JS = """
 // Android WebView (Chromium) paints a gray full-size default play-button
 // artwork over <video> elements that have no poster and no decoded frame yet
 // (it is compositor-drawn, so CSS on the media-controls pseudo-elements cannot
-// hide it). iOS WKWebView shows plain black there. Keep such videos invisible
-// until their first frame is decodable so the wait state matches iOS.
-private const val INJECT_HIDE_MEDIA_PLACEHOLDER_JS = """
+// hide it). iOS WKWebView shows plain black there. Until the first frame is
+// decodable we keep the video invisible and show a dark overlay with a spinner
+// in its container instead, so the wait state reads as "loading" on both
+// platforms. Same-origin iframes (the widget wrapper hosts the embed in one)
+// are covered too.
+internal const val INJECT_HIDE_MEDIA_PLACEHOLDER_JS = """
 (function() {
   if (window.__tagnologyPosterGuardInjected) return;
   window.__tagnologyPosterGuardInjected = true;
+
+  var SAFETY_MS = 30000;
+
+  function ensureStyle(doc) {
+    if (!doc || doc.__tagnologySpinnerStyle) return;
+    doc.__tagnologySpinnerStyle = true;
+    try {
+      var style = doc.createElement('style');
+      style.textContent =
+        '@keyframes tagnologySpin { to { transform: rotate(360deg); } }' +
+        '.tagnology-media-loading { position:absolute; left:0; top:0; right:0; bottom:0;' +
+        ' display:flex; align-items:center; justify-content:center; pointer-events:none;' +
+        ' background:#000; z-index:2147483647; }' +
+        '.tagnology-media-loading > div { width:32px; height:32px; box-sizing:border-box;' +
+        ' border:3px solid rgba(255,255,255,0.25); border-top-color:#fff; border-radius:50%;' +
+        ' animation: tagnologySpin 0.8s linear infinite; }';
+      (doc.head || doc.documentElement).appendChild(style);
+    } catch (e) {}
+  }
+
+  function showLoading(video) {
+    if (video.__tagnologyLoading) return;
+    var parent = video.parentElement;
+    if (!parent) return;
+    var doc = video.ownerDocument || document;
+    ensureStyle(doc);
+    try {
+      var pos = (doc.defaultView || window).getComputedStyle(parent).position;
+      if (pos === 'static') {
+        parent.__tagnologyPosPatched = true;
+        parent.style.setProperty('position', 'relative', 'important');
+      }
+    } catch (e) {}
+    var overlay = doc.createElement('div');
+    overlay.className = 'tagnology-media-loading';
+    overlay.appendChild(doc.createElement('div'));
+    parent.appendChild(overlay);
+    video.__tagnologyLoading = overlay;
+  }
+
+  function hideLoading(video) {
+    var overlay = video.__tagnologyLoading;
+    if (!overlay) return;
+    video.__tagnologyLoading = null;
+    var parent = overlay.parentElement;
+    if (parent) {
+      parent.removeChild(overlay);
+      if (parent.__tagnologyPosPatched) {
+        parent.__tagnologyPosPatched = false;
+        parent.style.removeProperty('position');
+      }
+    }
+  }
 
   function guard(video) {
     if (video.__tagnologyPosterGuard) return;
@@ -1192,41 +1278,70 @@ private const val INJECT_HIDE_MEDIA_PLACEHOLDER_JS = """
       if (!video.poster && video.readyState < 2) {
         hidden = true;
         video.style.setProperty('opacity', '0', 'important');
+        showLoading(video);
       }
     }
     function restore() {
       if (!hidden) return;
       hidden = false;
       video.style.removeProperty('opacity');
+      hideLoading(video);
     }
 
     hideIfNoFrame();
-    ['loadeddata', 'playing', 'timeupdate', 'error'].forEach(function (name) {
+    ['loadeddata', 'playing', 'timeupdate', 'error', 'emptied'].forEach(function (name) {
       video.addEventListener(name, restore);
     });
     // Safety net: never leave a video permanently invisible.
-    setTimeout(restore, 8000);
+    setTimeout(restore, SAFETY_MS);
   }
 
   function scan(root) {
     if (!root || !root.querySelectorAll) return;
     var videos = root.querySelectorAll('video');
     for (var i = 0; i < videos.length; i += 1) guard(videos[i]);
+    var frames = root.querySelectorAll('iframe');
+    for (var k = 0; k < frames.length; k += 1) guardFrame(frames[k]);
+  }
+
+  function observe(doc) {
+    if (!doc || doc.__tagnologyPosterGuardObserved) return;
+    doc.__tagnologyPosterGuardObserved = true;
+    new MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i += 1) {
+        var added = mutations[i].addedNodes;
+        for (var j = 0; j < added.length; j += 1) {
+          var node = added[j];
+          if (node && node.nodeType === 1) {
+            if (node.tagName === 'VIDEO') guard(node);
+            else if (node.tagName === 'IFRAME') guardFrame(node);
+            else scan(node);
+          }
+        }
+      }
+    }).observe(doc.documentElement || doc, { childList: true, subtree: true });
+  }
+
+  // The widget wrapper page hosts the embed in a same-origin iframe; reach into
+  // it so its <video> elements get the same treatment. Cross-origin frames are
+  // skipped silently.
+  function guardFrame(frame) {
+    function attach() {
+      var doc = null;
+      try { doc = frame.contentDocument; } catch (e) { doc = null; }
+      if (!doc) return;
+      scan(doc);
+      observe(doc);
+    }
+    attach();
+    if (!frame.__tagnologyPosterGuardLoad) {
+      frame.__tagnologyPosterGuardLoad = true;
+      frame.addEventListener('load', attach);
+    }
   }
 
   scan(document);
-  new MutationObserver(function (mutations) {
-    for (var i = 0; i < mutations.length; i += 1) {
-      var added = mutations[i].addedNodes;
-      for (var j = 0; j < added.length; j += 1) {
-        var node = added[j];
-        if (node && node.nodeType === 1) {
-          if (node.tagName === 'VIDEO') guard(node);
-          else scan(node);
-        }
-      }
-    }
-  }).observe(document.documentElement || document, { childList: true, subtree: true });
+  observe(document);
 })();
 """
 
