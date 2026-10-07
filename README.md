@@ -21,6 +21,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
+### v1.0.5（2026-10-07）
+
+客戶（91APP）回報：內容牆點擊事件設為「跳轉到 Instagram」時，點貼文後**整個 widget 被換成 IG 網頁**，接著顯示「Webpage not available」。
+
+- 原因：embed 以 `window.open(IG 網址, "_blank")` 開 IG；widget WebView 未開 multiple windows，改在自己的主框架導頁，
+  內容牆被 IG 頁面取代；IG 再轉成 `intent://` app link，一般 WebView 無法載入。原本只有 lightbox WebView 有攔外部連結。
+- 修正：widget WebView 主框架要離開 `embed.tagnology.co`（其他網站、`intent://`、`line://`、`mailto:` 等）一律交給外部 App
+  開啟，widget 不再被導走；embed iframe 內的子框架導頁不攔。`intent://` 改以 `Intent.parseUri` 解析並限定 browsable，
+  目標 App 未安裝時改開 `browser_fallback_url`（與 lightbox 共用）。
+- 測試：`WidgetExternalLinkTest`。模擬器以 91APP 分類頁範例實測，點擊「跳轉 IG」內容牆改由外部瀏覽器開啟、返回後 widget 完好。
+- 宿主不需改程式，只需將依賴升級為 `v1.0.5`。
+
 ### v1.0.4（2026-09-23）
 
 客戶（91APP）回報三個問題的修正，皆已在模擬器以 RecyclerView 宿主重現並驗證：
@@ -57,18 +69,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
 
-### 發版步驟（v1.0.4）
+### 發版步驟（v1.0.5）
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag v1.0.4
-git push origin v1.0.4
+git tag v1.0.5
+git push origin v1.0.5
 ```
 
 到 JitPack 確認建置：
 
-- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.4`
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.5`
 
 ### 使用方式
 
@@ -79,7 +91,7 @@ maven { url = uri("https://jitpack.io") }
 
 ```kotlin
 // app module dependency
-implementation("com.github.tagnologytw:embed-android-sdk:v1.0.4")
+implementation("com.github.tagnologytw:embed-android-sdk:v1.0.5")
 ```
 
 ## 使用方式（SDK）
