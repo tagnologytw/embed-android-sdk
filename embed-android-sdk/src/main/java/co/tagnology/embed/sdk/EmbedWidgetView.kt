@@ -249,6 +249,17 @@ fun EmbedWidgetView(
                             addJavascriptInterface(resizeBridge, "tagnologyResize")
                             addJavascriptInterface(eventBridge, "tagnologyEvent")
                             webViewClient = object : WebViewClient() {
+                                // 點擊事件設為「跳轉到 Instagram」時，embed 以 window.open(_blank) 開 IG；
+                                // WebView 未開 multiple windows，會改在本 WebView 主框架導頁，內容牆被 IG 網頁取代
+                                // （IG 再轉成 intent:// 時顯示 Webpage not available），故離站導頁一律交給外部 App
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    val target = request?.url?.toString().orEmpty()
+                                    if (!shouldOpenOutsideWidget(target, request?.isForMainFrame == true)) return false
+                                    val launched = openExternalUrl(context, target)
+                                    Log.d(tag, "widget=${widget.folderId} slot=${widget.position} external_link url=$target launched=$launched")
+                                    return true
+                                }
+
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     super.onPageStarted(view, url, favicon)
                                     Log.d(tag, "webview started widget=${widget.folderId} slot=${widget.position} url=$url")
@@ -1072,15 +1083,58 @@ private fun shouldOpenOutsideLightbox(url: String, hasGesture: Boolean): Boolean
     }.getOrDefault(false)
 }
 
+/**
+ * Whether a navigation in a widget WebView must leave the widget. The widget only ever
+ * shows the embed.tagnology.co iframe, so any main-frame navigation to another site
+ * (or a non-web scheme such as intent://) is a link the user wants to open elsewhere.
+ * Sub-frame navigations stay inside the embed iframe.
+ */
+internal fun shouldOpenOutsideWidget(url: String, isMainFrame: Boolean): Boolean {
+    if (!isMainFrame) return false
+    return runCatching {
+        val uri = Uri.parse(url.trim())
+        when (uri.scheme?.lowercase()) {
+            null, "", "about", "data", "javascript", "blob" -> false
+            "http", "https" -> {
+                val host = uri.host?.lowercase().orEmpty()
+                host.isNotBlank() && host != "embed.tagnology.co" && host != "www.embed.tagnology.co"
+            }
+            else -> true
+        }
+    }.getOrDefault(false)
+}
+
+/**
+ * Builds the intent that opens [url] outside the SDK. `intent://` URLs (Instagram's app
+ * links) are parsed as real intents, restricted to browsable targets; [Intent.ACTION_VIEW]
+ * on the raw URL would never resolve them.
+ */
+internal fun buildExternalIntent(url: String): Intent {
+    val intent = if (url.startsWith("intent:", ignoreCase = true)) {
+        Intent.parseUri(url, Intent.URI_INTENT_SCHEME).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            component = null
+            selector = null
+        }
+    } else {
+        Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    }
+    return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+}
+
 private fun openExternalUrl(context: android.content.Context, url: String): Boolean {
     return runCatching {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = buildExternalIntent(url)
+        try {
+            context.startActivity(intent)
+        } catch (e: android.content.ActivityNotFoundException) {
+            // intent:// 指定的 App 未安裝時，改開 intent 內附的網頁版
+            val fallbackUrl = intent.getStringExtra("browser_fallback_url") ?: throw e
+            context.startActivity(buildExternalIntent(fallbackUrl))
         }
-        context.startActivity(intent)
         true
     }.getOrElse {
-        Log.e("EmbedSDK", "lightbox openExternalUrl fail url=$url err=${it.message}")
+        Log.e("EmbedSDK", "openExternalUrl fail url=$url err=${it.message}")
         false
     }
 }
