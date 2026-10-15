@@ -92,9 +92,9 @@ private fun ProductDemoScreen(
     onGoFloatingPage: () -> Unit,
     onGoRecyclerPage: () -> Unit,
 ) {
-    val pageUrl = "https://partnertest4.91app.com/SalePage/Index/8778110"
-    val mid = "41458"
-    val secret = "P5Sayl2krqbPV8ORsekcSDoWFUEiurKW2WMbm62b5Cs="
+    val pageUrl = "https://partnertest7.91app.com/SalePage/Index/9394400"
+    val mid = "41461"
+    val secret = "ouzHR2algjnEqBV42n+dGDAUejipDTlGFHHZuFqss+4="
     val useMockData = false
 
     var initialized by remember { mutableStateOf(false) }
@@ -265,10 +265,10 @@ private fun OtherDemoScreen(
 private fun FloatingMediaDemoScreen(
     onBackToProduct: () -> Unit,
 ) {
-    // 此頁面在後台設定了右下角與左上角兩個浮窗影音
-    val pageUrl = "https://partnertest4.91app.com/SalePage/Index/8778040"
-    val mid = "41458"
-    val secret = "P5Sayl2krqbPV8ORsekcSDoWFUEiurKW2WMbm62b5Cs="
+    // 與 iOS 範例相同的測試頁（partnertest7，mid 41461），浮窗版位依 SDK 回傳顯示
+    val pageUrl = "https://partnertest7.91app.com/SalePage/Index/9394400"
+    val mid = "41461"
+    val secret = "ouzHR2algjnEqBV42n+dGDAUejipDTlGFHHZuFqss+4="
 
     var initialized by remember { mutableStateOf(false) }
     var initMessage by remember { mutableStateOf("初始化中…") }

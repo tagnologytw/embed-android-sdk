@@ -47,9 +47,9 @@ import co.tagnology.embed.sdk.EmbedWidgetView
 fun RecyclerViewDemoScreen(
     onBackToProduct: () -> Unit,
 ) {
-    val pageUrl = "https://partnertest4.91app.com/SalePage/Index/8778110"
-    val mid = "41458"
-    val secret = "P5Sayl2krqbPV8ORsekcSDoWFUEiurKW2WMbm62b5Cs="
+    val pageUrl = "https://partnertest7.91app.com/SalePage/Index/9394400"
+    val mid = "41461"
+    val secret = "ouzHR2algjnEqBV42n+dGDAUejipDTlGFHHZuFqss+4="
 
     val initialized = remember { mutableStateOf(false) }
     val recomposeKey = remember { mutableStateOf(0) }
