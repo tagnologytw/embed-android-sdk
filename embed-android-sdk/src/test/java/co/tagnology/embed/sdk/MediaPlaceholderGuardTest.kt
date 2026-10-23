@@ -1,5 +1,6 @@
 package co.tagnology.embed.sdk
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -45,6 +46,16 @@ class MediaPlaceholderGuardTest {
         assertTrue(script.contains("@keyframes tagnologySpin"))
         assertTrue("overlay must not intercept touches", script.contains("pointer-events:none"))
         assertTrue("overlay must be created in the video's own document (iframe case)", script.contains("video.ownerDocument"))
+    }
+
+    @Test
+    fun overlayStaysBelowThePagesOwnUi() {
+        // 91APP: with z-index 2147483647 the overlay covered the story header,
+        // close button, caption and product cards while a video loaded.
+        assertFalse("overlay must not use a maximal z-index", script.contains("2147483647"))
+        assertTrue(script.contains("z-index:0;"))
+        assertTrue("overlay must sit right after the video", script.contains("parent.insertBefore(overlay, video.nextSibling)"))
+        assertFalse(script.contains("parent.appendChild(overlay)"))
     }
 
     @Test

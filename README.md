@@ -21,6 +21,28 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
+### v1.0.6（2026-10-23）
+
+客戶（91APP）以 OMOStore7（10/20 版 APK）回報，精選動態有兩個問題，與 iOS 1.0.14 修正的問題相同：
+點開 Lightbox 時出現黑畫面，以及底部的貼文說明、商品連結被切掉。
+
+- **黑畫面**：點擊後約 1.2 秒只有黑底、沒有任何載入指示。
+  - 原因：每個 `EmbedWidgetView`（分類頁有 `ABOVE_FILTER` 加上 6 個 `FIXED_*` 版位）各自預載一份 Lightbox 頁面，
+    進頁時最多 7 份同時載入，點擊時那一份常常還沒載完。
+  - 修正：同一頁、同一個 window 的所有版位改為**共用一份預先載入的 Lightbox**，而且只有真的有內容牆的版位才會預載
+    （`SharedLightbox`，與 Web 版預先建立隱藏的 Lightbox iframe、iOS 1.0.14 相同）。點擊後到頁面回報 `toggleLB open=true`
+    之前，會在黑底上**先顯示原生的載入轉圈**，不再只有黑底。
+  - 只有頁面自己送出 `toggleLB open=false` 才算乾淨關閉；用返回鍵、右上角原生關閉區關閉時會重新載入頁面，與 iOS 相同。
+    否則頁面會保留上一則內容：關閉浮窗影音後再點精選動態，會開成前一支浮窗影片，影片也可能在背景繼續播放。
+- **底部被切到**：Lightbox WebView 原本只避開狀態列。現在依 window 的系統列與瀏海 inset 留白，三鍵導覽與手勢導覽下，
+  說明文字和商品卡片都完整顯示在導覽列上方。
+- **影片載入時只看到轉圈**：影片載入遮罩原本的 z-index 是 2147483647，把限時動態的標題、X、進度條、說明文字和商品卡片
+  全部蓋住。現在遮罩改接在 `<video>` 後面、z-index 0，只蓋影片本身。
+- 測試：`SharedLightboxTest`、`MediaPlaceholderGuardTest`。已在模擬器以 91APP 分類頁範例（532417）與 demo 的
+  RecyclerView 宿主實測：手勢導覽與三鍵導覽都測過，錄影未偵測到純黑畫面，依序開浮窗影音、返回、精選動態，內容都正確。
+- 移除 GitHub Actions workflow，以免 GitHub 雲端 VM 的成本過高；改在本機執行 `scripts/test-local.sh`。
+- 宿主不需改程式，只需將依賴升級為 `v1.0.6`。
+
 ### v1.0.5（2026-10-07）
 
 客戶（91APP）回報：內容牆點擊事件設為「跳轉到 Instagram」時，點貼文後**整個 widget 被換成 IG 網頁**，接著顯示「Webpage not available」。
@@ -190,6 +212,8 @@ EmbedWidgetView(
 - `EmbedWidgetView` 預設 `enableLightbox = true`
 - 當 iframe 事件符合 lightbox 展開條件（例如 `eventType=click` / `position=fixed`）時，SDK 會開啟 `https://embed.tagnology.co/lightBox?page=...`
 - 事件會透過 `onEvent` 回傳，並在主 widget 與 lightbox 之間橋接 message
+- 同一頁、同一個 Activity 的所有版位共用一份 Lightbox；第一個有內容牆的版位出現時就會預載
+- Lightbox 內容會避開狀態列、導覽列與瀏海；頁面顯示內容前會先顯示載入轉圈
 
 ## WebView 安全設定與行為說明
 
@@ -271,6 +295,16 @@ EmbedWidgetView(
 Lightbox 覆蓋層會掛在 Activity 的 DecorView 上。若 `EmbedWidgetView` 放在 RecyclerView cell 內的 ComposeView，
 cell 進入回收池後仍可能重新 compose；SDK 會等 view 重新 attach 到 window 後才掛覆蓋層，避免覆蓋層落在 cell 內。
 `demo` 的「RecyclerView 宿主測試」頁可重現與驗證此情境。
+
+## 本地測試
+
+已移除 GitHub Actions workflow，以免 GitHub 雲端 VM 的成本過高。發 PR 前請在本機執行：
+
+```bash
+scripts/test-local.sh
+```
+
+這支 script 會編譯 SDK 與 demo，並執行 SDK 單元測試；另外還要在模擬器實際操作版位與 Lightbox。
 
 ## 備註
 
