@@ -91,18 +91,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
 
-### 發版步驟（v1.0.5）
+### 發版步驟（v1.0.6）
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag v1.0.5
-git push origin v1.0.5
+git tag v1.0.6
+git push origin v1.0.6
 ```
 
 到 JitPack 確認建置：
 
-- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.5`
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.6`
 
 ### 使用方式
 
@@ -113,7 +113,7 @@ maven { url = uri("https://jitpack.io") }
 
 ```kotlin
 // app module dependency
-implementation("com.github.tagnologytw:embed-android-sdk:v1.0.5")
+implementation("com.github.tagnologytw:embed-android-sdk:v1.0.6")
 ```
 
 ## 使用方式（SDK）
