@@ -2,15 +2,30 @@ package co.tagnology.embed.sdk
 
 import android.util.Base64
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.net.SocketTimeoutException
 import java.net.URL
 
 object EmbedAndroidSDK {
     private const val DEFAULT_BASE_URL = "https://embed.tagnology.co/api"
     private const val TAG = "EmbedSDK"
+
+    /**
+     * Default limit for initialize to get the page data. Past it, initialize returns
+     * a 408 error and the App should not show the widgets.
+     */
+    const val DEFAULT_INITIALIZE_TIMEOUT_MS = 3_000L
+
+    // pageBundle requests run here so initialize can stop waiting at the deadline:
+    // a blocking HttpURLConnection does not respond to coroutine cancellation.
+    private val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val BELOW_BUY_BUTTON = EmbedPosition.BELOW_BUY_BUTTON
     val BELOW_MAIN_PRODUCT_INFO = EmbedPosition.BELOW_MAIN_PRODUCT_INFO
@@ -29,14 +44,22 @@ object EmbedAndroidSDK {
     private val pageBundleCache = mutableMapOf<String, List<EmbedWidgetItem>>()
     private val mockPageBundle = mutableMapOf<String, List<EmbedWidgetItem>>()
 
+    /**
+     * Initializes embed data for the current page. Call it before showing EmbedWidgetView.
+     *
+     * @param timeoutMs Milliseconds allowed to get the page data (DEFAULT_INITIALIZE_TIMEOUT_MS, 3000).
+     *        Past it, initialize returns a 408 error. 0 or less means no limit.
+     * @return null on success; the error when initialization fails.
+     */
     suspend fun initialize(
         pageUrl: String,
         mid: String,
         secret: String,
         baseUrl: String = DEFAULT_BASE_URL,
         forceRefresh: Boolean = false,
+        timeoutMs: Long = DEFAULT_INITIALIZE_TIMEOUT_MS,
     ): EmbedWidgetLoadError? = withContext(Dispatchers.IO) {
-        Log.d(TAG, "initialize start pageUrl=$pageUrl mid=$mid forceRefresh=$forceRefresh")
+        Log.d(TAG, "initialize start pageUrl=$pageUrl mid=$mid forceRefresh=$forceRefresh timeoutMs=$timeoutMs")
         val pageId = extractPageId(pageUrl) ?: return@withContext EmbedWidgetLoadError(
             statusCode = 422,
             message = "pageUrl 無法解析頁面 ID",
@@ -79,13 +102,21 @@ object EmbedAndroidSDK {
             return@withContext null
         }
 
-        val result = EmbedApi.fetchPageBundle(
-            baseUrl = baseUrl,
+        val result = withDeadline(timeoutMs) {
+            EmbedApi.fetchPageBundle(
+                baseUrl = baseUrl,
+                pageUrl = pageUrl,
+                pageId = pageId,
+                mid = mid,
+                payloadSecret = secret,
+                timeoutMs = timeoutMs,
+            )
+        } ?: return@withContext EmbedWidgetLoadError(
+            statusCode = 408,
+            message = "pageBundle 超過 ${timeoutMs}ms 未回應",
             pageUrl = pageUrl,
-            pageId = pageId,
-            mid = mid,
-            payloadSecret = secret,
-        )
+            position = EmbedPosition.BELOW_BUY_BUTTON,
+        ).also { Log.e(TAG, "initialize fail status=408 timeoutMs=$timeoutMs pageUrl=$pageUrl") }
 
         return@withContext if (result.isSuccess) {
             val widgets = result.getOrDefault(emptyList())
@@ -99,12 +130,15 @@ object EmbedAndroidSDK {
             )
             null
         } else {
+            val exception = result.exceptionOrNull()
+            // The socket timeouts match the deadline, so a stalled request may end here first.
+            val statusCode = if (exception is SocketTimeoutException) 408 else 500
             EmbedWidgetLoadError(
-                statusCode = 500,
-                message = result.exceptionOrNull()?.message ?: "初始化失敗",
+                statusCode = statusCode,
+                message = exception?.message ?: "初始化失敗",
                 pageUrl = pageUrl,
                 position = EmbedPosition.BELOW_BUY_BUTTON,
-            ).also { Log.e(TAG, "initialize fail status=500 error=${it.message}") }
+            ).also { Log.e(TAG, "initialize fail status=$statusCode error=${it.message}") }
         }
     }
 
@@ -154,6 +188,20 @@ object EmbedAndroidSDK {
 
     fun clearMockPageBundle(pageUrl: String? = null) {
         if (pageUrl == null) mockPageBundle.clear() else mockPageBundle.remove(pageUrl)
+    }
+
+    /**
+     * Runs a blocking request and returns its result, or null once timeoutMs pass first.
+     * The request keeps running in the background until its own socket timeouts end it;
+     * its late result is dropped. timeoutMs of 0 or less waits without a limit.
+     */
+    private suspend fun <T : Any> withDeadline(timeoutMs: Long, request: () -> T): T? {
+        if (timeoutMs <= 0) return request()
+        val pending = requestScope.async { request() }
+        return withTimeoutOrNull(timeoutMs) { pending.await() } ?: run {
+            pending.cancel()
+            null
+        }
     }
 
     private fun isSecretValid(secret: String): Boolean {

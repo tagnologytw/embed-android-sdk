@@ -10,6 +10,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -161,6 +162,57 @@ class EmbedAndroidSDKInitializeTest {
         assertNull(error)
         val payload = decryptPayload(takePageBundleRequest())
         assertEquals("9394402", payload.getString("id"))
+    }
+
+    // Timeout
+
+    @Test
+    fun defaultTimeoutShouldBeThreeSeconds() {
+        assertEquals(3_000L, EmbedAndroidSDK.DEFAULT_INITIALIZE_TIMEOUT_MS)
+    }
+
+    @Test
+    fun slowPageBundleShouldReturn408AtTheDeadline() = runBlocking {
+        val pageUrl = "https://partnertest4.91app.com/SalePage/Index/9394402"
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{\"pageBundle\":[]}").setHeadersDelay(3, TimeUnit.SECONDS))
+
+        val started = System.nanoTime()
+        val error = EmbedAndroidSDK.initialize(pageUrl, mid, secret, baseUrl, timeoutMs = 300)
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+
+        assertNotNull(error)
+        assertEquals(408, error!!.statusCode)
+        assertTrue("initialize took ${elapsedMs}ms", elapsedMs < 1_500)
+        // A timed-out page is not cached, so the widgets stay hidden and a retry requests again.
+        assertTrue(EmbedAndroidSDK.getWidgets(pageUrl, EmbedPosition.BELOW_BUY_BUTTON).isFailure)
+    }
+
+    @Test
+    fun timedOutPageShouldSucceedOnRetry() = runBlocking {
+        val pageUrl = "https://partnertest4.91app.com/SalePage/Index/9394402"
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{\"pageBundle\":[]}").setHeadersDelay(3, TimeUnit.SECONDS))
+        val first = EmbedAndroidSDK.initialize(pageUrl, mid, secret, baseUrl, timeoutMs = 300)
+        assertEquals(408, first?.statusCode)
+
+        enqueuePageBundle("BELOW_BUY_BUTTON")
+        val second = EmbedAndroidSDK.initialize(pageUrl, mid, secret, baseUrl, timeoutMs = 2_000)
+
+        assertNull(second)
+        assertEquals(1, EmbedAndroidSDK.getWidgets(pageUrl, EmbedPosition.BELOW_BUY_BUTTON).getOrThrow().size)
+    }
+
+    @Test
+    fun zeroTimeoutShouldWaitForTheResponse() = runBlocking {
+        val pageUrl = "https://partnertest4.91app.com/SalePage/Index/9394402"
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("{\"pageBundle\":[]}").setHeadersDelay(500, TimeUnit.MILLISECONDS)
+        )
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        val error = EmbedAndroidSDK.initialize(pageUrl, mid, secret, baseUrl, timeoutMs = 0)
+
+        assertNull(error)
+        assertEquals("/api/widget/pageBundle", takePageBundleRequest().path)
     }
 
     // Validation failures
