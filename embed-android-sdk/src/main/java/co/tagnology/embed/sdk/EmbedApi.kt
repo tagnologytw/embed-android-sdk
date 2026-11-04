@@ -21,14 +21,17 @@ internal object EmbedApi {
         pageId: String,
         mid: String,
         payloadSecret: String,
+        timeoutMs: Long = 0,
     ): Result<List<EmbedWidgetItem>> {
         return runCatching {
             val endpoint = "${baseUrl.trimEnd('/')}/widget/pageBundle"
             Log.d(TAG, "fetchPageBundle endpoint=$endpoint pageUrl=$pageUrl pageId=$pageId mid=$mid")
+            // A request past initialize's deadline is dropped, so stop it there too.
+            val socketTimeoutMs = if (timeoutMs > 0) timeoutMs.coerceAtMost(10_000L).toInt() else 10_000
             val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = 10000
-                readTimeout = 10000
+                connectTimeout = socketTimeoutMs
+                readTimeout = socketTimeoutMs
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
             }

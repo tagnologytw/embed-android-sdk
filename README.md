@@ -21,6 +21,14 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
+### 未發布
+
+- `initialize` 新增讀取時間上限 `timeoutMs`（預設 `EmbedAndroidSDK.DEFAULT_INITIALIZE_TIMEOUT_MS` = 3000）：超過時間仍未取得頁面資料就回傳 `statusCode = 408`，App 不顯示版位即可（91APP 要求比照 App 內其他版位，API 超過 3 秒不顯示）。與 iOS SDK 的 `timeout` 相同。
+  - 計時從呼叫 `initialize` 開始；即使連線卡住不回應，`initialize` 也會在時限到時回傳，背景請求隨後由連線逾時結束並丟棄結果。
+  - 連線本身逾時（`SocketTimeoutException`）也改回報 `408`，原本是 `500`。
+  - `timeoutMs` 傳 `0` 或負數代表不限時（連線逾時維持 10 秒）。逾時的頁面不會寫入快取，下次 `initialize` 會重新請求。
+  - 只限制取得資料的時間；版位內容的網頁載入與繪製不在此限。
+
 ### v1.0.6（2026-10-23）
 
 客戶（91APP）以 OMOStore7（10/20 版 APK）回報，精選動態有兩個問題，與 iOS 1.0.14 修正的問題相同：
@@ -119,6 +127,7 @@ implementation("com.github.tagnologytw:embed-android-sdk:v1.0.6")
 ## 使用方式（SDK）
 
 - initialize 會呼叫：`POST {baseUrl}/widget/pageBundle`
+- `timeoutMs`（預設 `EmbedAndroidSDK.DEFAULT_INITIALIZE_TIMEOUT_MS` = 3000）：取得頁面資料的時間上限，超過即回傳 `statusCode = 408`，請不要顯示版位；`0` 或負數代表不限時。
 
 ```kotlin
 val error = EmbedAndroidSDK.initialize(
@@ -126,7 +135,9 @@ val error = EmbedAndroidSDK.initialize(
     mid = "41458",
     secret = "YOUR_PAYLOAD_SECRET_BASE64",
     forceRefresh = true,
+    // timeoutMs = 3_000L, // 預設值，可省略
 )
+// error?.statusCode == 408：超過時間上限，不顯示版位
 
 if (error == null) {
     EmbedWidgetView(
