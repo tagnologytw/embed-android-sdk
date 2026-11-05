@@ -21,13 +21,15 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
-### 未發布
+### v1.0.7（2026-11-05）
 
 - `initialize` 新增讀取時間上限 `timeoutMs`（預設 `EmbedAndroidSDK.DEFAULT_INITIALIZE_TIMEOUT_MS` = 3000）：超過時間仍未取得頁面資料就回傳 `statusCode = 408`，App 不顯示版位即可（91APP 要求比照 App 內其他版位，API 超過 3 秒不顯示）。與 iOS SDK 的 `timeout` 相同。
   - 計時從呼叫 `initialize` 開始；即使連線卡住不回應，`initialize` 也會在時限到時回傳，背景請求隨後由連線逾時結束並丟棄結果。
   - 連線本身逾時（`SocketTimeoutException`）也改回報 `408`，原本是 `500`。
   - `timeoutMs` 傳 `0` 或負數代表不限時（連線逾時維持 10 秒）。逾時的頁面不會寫入快取，下次 `initialize` 會重新請求。
   - 只限制取得資料的時間；版位內容的網頁載入與繪製不在此限。
+- 版位網頁（embed.tagnology.co）同步改善載入速度：精選動態點開即顯示、`/display` 少下載約 100 KB 的翻譯；Android WebView 原本就跨啟動保留快取，不需改 SDK。
+- 宿主不需改程式，將依賴升級為 `v1.0.7` 即套用預設 3 秒上限；需要不同秒數再傳 `timeoutMs`。
 
 ### v1.0.6（2026-10-23）
 
@@ -99,18 +101,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
 
-### 發版步驟（v1.0.6）
+### 發版步驟（v1.0.7）
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag v1.0.6
-git push origin v1.0.6
+git tag v1.0.7
+git push origin v1.0.7
 ```
 
 到 JitPack 確認建置：
 
-- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.6`
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.7`
 
 ### 使用方式
 
@@ -121,7 +123,7 @@ maven { url = uri("https://jitpack.io") }
 
 ```kotlin
 // app module dependency
-implementation("com.github.tagnologytw:embed-android-sdk:v1.0.6")
+implementation("com.github.tagnologytw:embed-android-sdk:v1.0.7")
 ```
 
 ## 使用方式（SDK）
