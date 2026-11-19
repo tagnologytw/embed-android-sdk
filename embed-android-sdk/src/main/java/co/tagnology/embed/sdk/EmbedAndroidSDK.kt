@@ -40,6 +40,20 @@ object EmbedAndroidSDK {
     val FIXED_CENTER_LEFT = EmbedPosition.FIXED_CENTER_LEFT
     val FIXED_CENTER_RIGHT = EmbedPosition.FIXED_CENTER_RIGHT
 
+    /**
+     * Lets the App open links tapped in widgets and the lightbox (for example product cards)
+     * itself, such as a native product page instead of the browser. The handler gets every
+     * link that leaves embed.tagnology.co, on the main thread.
+     * - Return true: the App opened the link. The SDK does not open the browser, and closes
+     *   the lightbox if it is showing.
+     * - Return false: the SDK opens the link as before (browser or an app that claims it).
+     * Not set (default) or null: every link opens as before.
+     */
+    @JvmStatic
+    fun setLinkHandler(handler: EmbedLinkHandler?) {
+        EmbedLinkOpener.appHandler = handler
+    }
+
     private val lock = Mutex()
     private val pageBundleCache = mutableMapOf<String, List<EmbedWidgetItem>>()
     private val mockPageBundle = mutableMapOf<String, List<EmbedWidgetItem>>()
