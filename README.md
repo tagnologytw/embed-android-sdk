@@ -21,6 +21,15 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
+### v1.0.8（2026-11-19）
+
+- 新增 `EmbedAndroidSDK.setLinkHandler(EmbedLinkHandler?)`：使用者點擊版位或 Lightbox 內的商品卡等連結時，SDK 先把完整網址交給 App，App 回傳 `true` 代表已自行開啟（例如轉成 App 內的原生商品頁），SDK 就不開外部瀏覽器（91APP 回報商品在瀏覽器開啟後，收藏、加入購物車、登入狀態與 App 不同步）。
+  - App 回傳 `true` 時，若 Lightbox 正開著，SDK 會自動關閉 Lightbox（重新載入讓影片停止），App 的原生頁不會被 Lightbox 蓋住。
+  - App 回傳 `false`、handler 丟出例外，或未設定 handler：維持原本行為，交給外部 App（瀏覽器或對應 App）開啟。未呼叫 `setLinkHandler` 的整合不受影響。
+  - 只有離開 `embed.tagnology.co` 的連結會交給 handler；版位與 Lightbox 自身的頁面不會。
+  - 與 iOS SDK 1.0.17 的 `EmbedIOSSDK.setLinkHandler(_:)` 行為相同。
+- 測試：`EmbedLinkHandlerTest`。
+
 ### v1.0.7（2026-11-05）
 
 - `initialize` 新增讀取時間上限 `timeoutMs`（預設 `EmbedAndroidSDK.DEFAULT_INITIALIZE_TIMEOUT_MS` = 3000）：超過時間仍未取得頁面資料就回傳 `statusCode = 408`，App 不顯示版位即可（91APP 要求比照 App 內其他版位，API 超過 3 秒不顯示）。與 iOS SDK 的 `timeout` 相同。
@@ -101,18 +110,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
 
-### 發版步驟（v1.0.7）
+### 發版步驟（v1.0.8）
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag v1.0.7
-git push origin v1.0.7
+git tag v1.0.8
+git push origin v1.0.8
 ```
 
 到 JitPack 確認建置：
 
-- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.7`
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.8`
 
 ### 使用方式
 
@@ -123,7 +132,7 @@ maven { url = uri("https://jitpack.io") }
 
 ```kotlin
 // app module dependency
-implementation("com.github.tagnologytw:embed-android-sdk:v1.0.7")
+implementation("com.github.tagnologytw:embed-android-sdk:v1.0.8")
 ```
 
 ## 使用方式（SDK）
@@ -220,6 +229,37 @@ EmbedWidgetView(
 - `mediaId`：被點擊素材 id（若 payload 無提供則為 `null`）。
 - `url`：點擊對應網址（無值時回退為目前 pageUrl）。
 
+### 商品連結交給 App 開啟（`setLinkHandler`）
+
+使用者點擊版位或 Lightbox 內的商品卡（或其他離開 `embed.tagnology.co` 的連結）時，預設以外部 App（瀏覽器或對應 App）開啟。App 若想改開自己的原生頁（例如商品頁），在 `Application.onCreate()` 設定一次 link handler：
+
+```kotlin
+// Kotlin
+EmbedAndroidSDK.setLinkHandler { url ->
+    // url 為完整網址，例如 https://{shop}/SalePage/Index/{id}?utm_source=embed_tagnology
+    // App 能以原生頁開啟就導過去並回傳 true；否則回傳 false
+    navigator.toNavigator(url)
+}
+```
+
+```java
+// Java
+EmbedAndroidSDK.setLinkHandler(url -> navigator.toNavigator(url));
+```
+
+| handler 回傳 | SDK 行為 |
+|---|---|
+| `true` | 不開外部瀏覽器；若 Lightbox 正開著，SDK 會自動關閉（並重新載入讓影片停止），App 的原生頁不會被蓋住 |
+| `false` / 丟出例外 | 與未設定相同，交給外部 App 開啟 |
+| 未設定 / `setLinkHandler(null)` | 全部交給外部 App 開啟（v1.0.7 以前的行為） |
+
+注意事項：
+
+- handler 在主執行緒同步呼叫，請只做判斷並開始導頁（例如 `startActivity`、切換 Fragment），不要在裡面做耗時工作。
+- 網址原封不動傳入（含 `utm_*` 等 query），解析方式由 App 決定；SDK 不針對特定電商平台判斷。
+- 只有離開 `embed.tagnology.co` 的連結會交給 handler（商品頁、Instagram、`intent://`、`tel:`、`mailto:`、`line:` 等），版位與 Lightbox 自身的頁面不會。
+- 點擊成效追蹤由版位網頁在開啟連結前送出，不受 handler 影響。
+
 ### Lightbox（Fullscreen）
 
 - `EmbedWidgetView` 預設 `enableLightbox = true`
@@ -227,6 +267,7 @@ EmbedWidgetView(
 - 事件會透過 `onEvent` 回傳，並在主 widget 與 lightbox 之間橋接 message
 - 同一頁、同一個 Activity 的所有版位共用一份 Lightbox；第一個有內容牆的版位出現時就會預載
 - Lightbox 內容會避開狀態列、導覽列與瀏海；頁面顯示內容前會先顯示載入轉圈
+- Lightbox 內點商品卡等外部連結時，先交給 App 的 link handler（有設定時），未處理再交給外部 App 開啟；App 處理後 SDK 會關閉 Lightbox
 
 ## WebView 安全設定與行為說明
 

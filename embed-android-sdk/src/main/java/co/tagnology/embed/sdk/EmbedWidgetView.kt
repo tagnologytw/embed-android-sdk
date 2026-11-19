@@ -256,8 +256,8 @@ fun EmbedWidgetView(
                                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                     val target = request?.url?.toString().orEmpty()
                                     if (!shouldOpenOutsideWidget(target, request?.isForMainFrame == true)) return false
-                                    val launched = openExternalUrl(context, target)
-                                    Log.d(tag, "widget=${widget.folderId} slot=${widget.position} external_link url=$target launched=$launched")
+                                    val outcome = EmbedLinkOpener.open(context, target)
+                                    Log.d(tag, "widget=${widget.folderId} slot=${widget.position} external_link url=$target outcome=$outcome")
                                     return true
                                 }
 

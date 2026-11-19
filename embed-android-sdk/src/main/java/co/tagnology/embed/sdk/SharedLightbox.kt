@@ -425,9 +425,12 @@ internal class SharedLightbox private constructor(
                         return true
                     }
                     if (mainFrame && shouldOpenOutsideLightbox(target, request?.hasGesture() == true)) {
-                        val launched = openExternalUrl(context, target)
-                        Log.d(TAG, "lightbox external_link url=$target launched=$launched")
-                        return launched
+                        val outcome = EmbedLinkOpener.open(context, target)
+                        Log.d(TAG, "lightbox external_link url=$target outcome=$outcome")
+                        // App 以原生頁開啟商品連結時關閉 Lightbox，避免原生頁被覆蓋層蓋住；
+                        // 非頁面自行關閉，dismiss 會重載 Lightbox 讓影片停止播放（post 出去，不在導頁回呼中重載）
+                        if (outcome == LinkOutcome.HANDLED_BY_APP) mainHandler.post { dismiss("app_link_handler") }
+                        return outcome != LinkOutcome.FAILED
                     }
                     if (target.contains("/undefined")) {
                         Log.e(TAG, "lightbox navigate undefined url=$target")
