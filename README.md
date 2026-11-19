@@ -21,7 +21,7 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
-### v1.0.8（未發版）
+### v1.0.8（2026-11-19）
 
 - 新增 `EmbedAndroidSDK.setLinkHandler(EmbedLinkHandler?)`：使用者點擊版位或 Lightbox 內的商品卡等連結時，SDK 先把完整網址交給 App，App 回傳 `true` 代表已自行開啟（例如轉成 App 內的原生商品頁），SDK 就不開外部瀏覽器（91APP 回報商品在瀏覽器開啟後，收藏、加入購物車、登入狀態與 App 不同步）。
   - App 回傳 `true` 時，若 Lightbox 正開著，SDK 會自動關閉 Lightbox（重新載入讓影片停止），App 的原生頁不會被 Lightbox 蓋住。
@@ -110,18 +110,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
 
-### 發版步驟（v1.0.7）
+### 發版步驟（v1.0.8）
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag v1.0.7
-git push origin v1.0.7
+git tag v1.0.8
+git push origin v1.0.8
 ```
 
 到 JitPack 確認建置：
 
-- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.7`
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.8`
 
 ### 使用方式
 
@@ -132,7 +132,7 @@ maven { url = uri("https://jitpack.io") }
 
 ```kotlin
 // app module dependency
-implementation("com.github.tagnologytw:embed-android-sdk:v1.0.7")
+implementation("com.github.tagnologytw:embed-android-sdk:v1.0.8")
 ```
 
 ## 使用方式（SDK）
