@@ -260,6 +260,14 @@ EmbedAndroidSDK.setLinkHandler(url -> navigator.toNavigator(url));
 - 只有離開 `embed.tagnology.co` 的連結會交給 handler（商品頁、Instagram、`intent://`、`tel:`、`mailto:`、`line:` 等），版位與 Lightbox 自身的頁面不會。
 - 點擊成效追蹤由版位網頁在開啟連結前送出，不受 handler 影響。
 
+Demo App 有完整範例（`demo/.../NativeProductActivity.kt`：把 `SalePage/Index/{id}` 開成原生頁，其他網址回傳 `false`）。預設不啟用，以下列指令啟動 demo 即可試用：
+
+```bash
+adb shell am start -n co.tagnology.embed.demo/.MainActivity --ez nativeProductLinks true
+```
+
+進入首頁浮窗影音 → 開啟 Lightbox → 點下方商品卡，會關閉 Lightbox 並開啟「原生商品頁」；不帶參數啟動時維持開外部瀏覽器。
+
 ### Lightbox（Fullscreen）
 
 - `EmbedWidgetView` 預設 `enableLightbox = true`
