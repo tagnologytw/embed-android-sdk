@@ -13,6 +13,13 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+/**
+ * The server says this merchant has not been granted App SDK access
+ * (HTTP 403 with errorCode APP_SDK_DISABLED). The App should not show widgets.
+ */
+internal class AppSdkDisabledException :
+    IllegalStateException("App SDK 未開通（errorCode=${EmbedAndroidSDK.ERROR_CODE_APP_SDK_DISABLED}）")
+
 internal object EmbedApi {
     private const val TAG = "EmbedSDK"
     fun fetchPageBundle(
@@ -50,6 +57,9 @@ internal object EmbedApi {
 
             val statusCode = connection.responseCode
             if (statusCode !in 200..299) {
+                if (statusCode == 403 && readErrorCode(connection) == EmbedAndroidSDK.ERROR_CODE_APP_SDK_DISABLED) {
+                    throw AppSdkDisabledException()
+                }
                 throw IllegalStateException("pageBundle API error status=$statusCode")
             }
 
@@ -58,6 +68,12 @@ internal object EmbedApi {
             parsePageBundle(bodyText, pageUrl)
         }
     }
+
+    /** Reads "errorCode" from an error response body; null when missing or not JSON. */
+    private fun readErrorCode(connection: HttpURLConnection): String? = runCatching {
+        val text = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: return@runCatching null
+        JSONObject(text).optString("errorCode").ifBlank { null }
+    }.getOrNull()
 
     private fun parsePageBundle(bodyText: String, pageUrl: String): List<EmbedWidgetItem> {
         val root = JSONObject(bodyText)

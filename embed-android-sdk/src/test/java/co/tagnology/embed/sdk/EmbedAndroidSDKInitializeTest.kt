@@ -164,6 +164,39 @@ class EmbedAndroidSDKInitializeTest {
         assertEquals("9394402", payload.getString("id"))
     }
 
+    // App SDK not enabled (server 403 APP_SDK_DISABLED)
+
+    @Test
+    fun appSdkDisabledShouldReturn403WithErrorCodeAndNotCache() = runBlocking {
+        val pageUrl = "https://partnertest4.91app.com/SalePage/Index/9394402"
+        val body = JSONObject()
+            .put("success", false)
+            .put("code", 403)
+            .put("errorCode", "APP_SDK_DISABLED")
+            .put("message", "app sdk disabled")
+        server.enqueue(MockResponse().setResponseCode(403).setBody(body.toString()))
+
+        val error = EmbedAndroidSDK.initialize(pageUrl, mid, secret, baseUrl)
+
+        assertNotNull(error)
+        assertEquals(403, error!!.statusCode)
+        assertEquals(EmbedAndroidSDK.ERROR_CODE_APP_SDK_DISABLED, error.errorCode)
+        takePageBundleRequest()
+        // Not cached: no widgets for the page, and the next initialize asks the server again.
+        assertTrue(EmbedAndroidSDK.getWidgets(pageUrl, EmbedPosition.BELOW_BUY_BUTTON).isFailure)
+    }
+
+    @Test
+    fun other403ShouldStayA500WithoutErrorCode() = runBlocking {
+        val pageUrl = "https://partnertest4.91app.com/SalePage/Index/9394402"
+        server.enqueue(MockResponse().setResponseCode(403).setBody("{\"message\":\"forbidden\"}"))
+
+        val error = EmbedAndroidSDK.initialize(pageUrl, mid, secret, baseUrl)
+
+        assertEquals(500, error!!.statusCode)
+        assertNull(error.errorCode)
+    }
+
     // Timeout
 
     @Test

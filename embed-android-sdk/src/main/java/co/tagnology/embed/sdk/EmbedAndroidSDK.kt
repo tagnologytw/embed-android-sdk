@@ -23,6 +23,13 @@ object EmbedAndroidSDK {
      */
     const val DEFAULT_INITIALIZE_TIMEOUT_MS = 3_000L
 
+    /**
+     * errorCode the server returns (HTTP 403) when the merchant has not been granted
+     * App SDK access in the Tagnology admin. initialize then returns an error with
+     * statusCode 403 and this errorCode: hide every widget and do not retry.
+     */
+    const val ERROR_CODE_APP_SDK_DISABLED = "APP_SDK_DISABLED"
+
     // pageBundle requests run here so initialize can stop waiting at the deadline:
     // a blocking HttpURLConnection does not respond to coroutine cancellation.
     private val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -146,13 +153,18 @@ object EmbedAndroidSDK {
         } else {
             val exception = result.exceptionOrNull()
             // The socket timeouts match the deadline, so a stalled request may end here first.
-            val statusCode = if (exception is SocketTimeoutException) 408 else 500
+            val statusCode = when (exception) {
+                is AppSdkDisabledException -> 403
+                is SocketTimeoutException -> 408
+                else -> 500
+            }
             EmbedWidgetLoadError(
                 statusCode = statusCode,
                 message = exception?.message ?: "初始化失敗",
                 pageUrl = pageUrl,
                 position = EmbedPosition.BELOW_BUY_BUTTON,
-            ).also { Log.e(TAG, "initialize fail status=$statusCode error=${it.message}") }
+                errorCode = if (exception is AppSdkDisabledException) ERROR_CODE_APP_SDK_DISABLED else null,
+            ).also { Log.e(TAG, "initialize fail status=$statusCode errorCode=${it.errorCode} error=${it.message}") }
         }
     }
 
