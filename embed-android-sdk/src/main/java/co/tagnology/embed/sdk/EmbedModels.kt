@@ -40,11 +40,18 @@ internal fun embedPositionForFloatingMediaPosition(value: String?): EmbedPositio
     else -> null
 }
 
+/**
+ * @property statusCode 204 no data, 403 App SDK not enabled, 408 timeout, 422 bad input,
+ *           428 not initialized, 500 other errors.
+ * @property errorCode Server error code when there is one, e.g.
+ *           EmbedAndroidSDK.ERROR_CODE_APP_SDK_DISABLED ("APP_SDK_DISABLED") with statusCode 403.
+ */
 data class EmbedWidgetLoadError(
     val statusCode: Int,
     val message: String,
     val pageUrl: String,
     val position: EmbedPosition,
+    val errorCode: String? = null,
 )
 
 data class EmbedWidgetClick(

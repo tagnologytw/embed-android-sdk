@@ -21,6 +21,14 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
+### v1.0.9（2026-11-23）
+
+- 新增錯誤碼 `APP_SDK_DISABLED`：商家在 Tagnology 後台尚未開通「App SDK」權限（預設關閉）時，`/widget/pageBundle` 回 HTTP 403 + `errorCode: "APP_SDK_DISABLED"`，`initialize` 會回傳 `statusCode = 403`、`errorCode = EmbedAndroidSDK.ERROR_CODE_APP_SDK_DISABLED` 的 `EmbedWidgetLoadError`。App 收到時**不要顯示任何版位、不要重試**。
+  - `EmbedWidgetLoadError` 新增選填欄位 `errorCode: String?`（預設 null），既有呼叫端不需改程式。
+  - 舊版 SDK（v1.0.8 以前）收到同樣回應時回報 `statusCode = 500`，一樣不會顯示版位。
+  - 403 結果不寫入快取，後台開通後下次 `initialize` 即恢復顯示。
+- 測試：`EmbedAndroidSDKInitializeTest`（403 + APP_SDK_DISABLED、其他 403 維持 500）。
+
 ### v1.0.8（2026-11-19）
 
 - 新增 `EmbedAndroidSDK.setLinkHandler(EmbedLinkHandler?)`：使用者點擊版位或 Lightbox 內的商品卡等連結時，SDK 先把完整網址交給 App，App 回傳 `true` 代表已自行開啟（例如轉成 App 內的原生商品頁），SDK 就不開外部瀏覽器（91APP 回報商品在瀏覽器開啟後，收藏、加入購物車、登入狀態與 App 不同步）。
@@ -110,18 +118,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
 
-### 發版步驟（v1.0.8）
+### 發版步驟（v1.0.9）
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag v1.0.8
-git push origin v1.0.8
+git tag v1.0.9
+git push origin v1.0.9
 ```
 
 到 JitPack 確認建置：
 
-- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.8`
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.9`
 
 ### 使用方式
 
@@ -132,7 +140,7 @@ maven { url = uri("https://jitpack.io") }
 
 ```kotlin
 // app module dependency
-implementation("com.github.tagnologytw:embed-android-sdk:v1.0.8")
+implementation("com.github.tagnologytw:embed-android-sdk:v1.0.9")
 ```
 
 ## 使用方式（SDK）
@@ -149,6 +157,8 @@ val error = EmbedAndroidSDK.initialize(
     // timeoutMs = 3_000L, // 預設值，可省略
 )
 // error?.statusCode == 408：超過時間上限，不顯示版位
+// error?.statusCode == 403 && error.errorCode == EmbedAndroidSDK.ERROR_CODE_APP_SDK_DISABLED：
+//   商家未開通 App SDK，不顯示任何版位、不要重試
 
 if (error == null) {
     EmbedWidgetView(
@@ -175,6 +185,17 @@ if (error == null) {
 
 若使用上述 `modifier` 寫法，請確認已引入：
 `import androidx.compose.ui.Modifier`、`import androidx.compose.foundation.layout.fillMaxWidth`、`import androidx.compose.foundation.layout.padding`、`import androidx.compose.ui.unit.dp`。
+
+## 錯誤碼對照（EmbedWidgetLoadError）
+
+| statusCode | errorCode | 來源 | 事件／意義 | App 建議處理 |
+|---|---|---|---|---|
+| 204 | — | `EmbedWidgetView` onError | 該版位沒有內容牆 | 隱藏該版位 |
+| 403 | `APP_SDK_DISABLED` | `initialize` 回傳 | 商家未開通 App SDK 權限（Tagnology 後台「編輯權限」→ App SDK，預設關閉） | 不顯示任何版位、不要重試；請聯繫 Tagnology 開通 |
+| 408 | — | `initialize` 回傳 | 超過 `timeoutMs` 未取得頁面資料 | 不顯示版位 |
+| 422 | — | `initialize` 回傳 | `pageUrl` 無法解析或 `secret` 格式錯誤 | 檢查整合參數 |
+| 428 | — | `EmbedWidgetView` onError | 尚未 `initialize`（或 `initialize` 失敗） | 先確認 `initialize` 回傳 null 再顯示版位 |
+| 500 | — | `initialize` 回傳 | 其他伺服器／網路錯誤（含 secret 驗證失敗 401） | 不顯示版位 |
 
 ## Analytics 事件（對齊 iOS SDK）
 
