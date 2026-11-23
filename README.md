@@ -21,7 +21,7 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
-### v1.0.9（未發版）
+### v1.0.9（2026-11-23）
 
 - 新增錯誤碼 `APP_SDK_DISABLED`：商家在 Tagnology 後台尚未開通「App SDK」權限（預設關閉）時，`/widget/pageBundle` 回 HTTP 403 + `errorCode: "APP_SDK_DISABLED"`，`initialize` 會回傳 `statusCode = 403`、`errorCode = EmbedAndroidSDK.ERROR_CODE_APP_SDK_DISABLED` 的 `EmbedWidgetLoadError`。App 收到時**不要顯示任何版位、不要重試**。
   - `EmbedWidgetLoadError` 新增選填欄位 `errorCode: String?`（預設 null），既有呼叫端不需改程式。
@@ -118,18 +118,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
 
-### 發版步驟（v1.0.8）
+### 發版步驟（v1.0.9）
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag v1.0.8
-git push origin v1.0.8
+git tag v1.0.9
+git push origin v1.0.9
 ```
 
 到 JitPack 確認建置：
 
-- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.8`
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.9`
 
 ### 使用方式
 
@@ -140,7 +140,7 @@ maven { url = uri("https://jitpack.io") }
 
 ```kotlin
 // app module dependency
-implementation("com.github.tagnologytw:embed-android-sdk:v1.0.8")
+implementation("com.github.tagnologytw:embed-android-sdk:v1.0.9")
 ```
 
 ## 使用方式（SDK）
