@@ -12,6 +12,7 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
   - `ABOVE_RECOMMENDATION`：相關推薦上方
   - `ABOVE_FILTER`：分類頁過濾器上方
 - `demo` app（對齊 iOS `ectest` 的展示用途）
+- ⭐ **`trackingUrl`（v1.0.10 新增）**：點擊版位、點擊商品連結時回傳 SDK 組好完整 UTM 的網址，見 [點擊追蹤網址 trackingUrl](#-點擊追蹤網址-trackingurlv1010-新增)
 
 ## 專案結構
 
@@ -19,10 +20,55 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 - `demo/`：示範 App
 - `../example-project/`：以 JitPack 依賴方式整合的最小範例（`useLocalSdk=true` 時改吃本機 SDK 原始碼）
 
+## ⭐ 點擊追蹤網址 trackingUrl（v1.0.10 新增）
+
+> App 可直接用 `trackingUrl` 裡的 UTM 做成效追蹤，與網頁版網址帶 UTM 的做法相同，不需要自己組網址。與 iOS SDK 1.0.19 行為相同。
+
+| 事件 | 從哪裡拿 | `trackingUrl` 的網址本體 | `utm_medium` |
+|---|---|---|---|
+| 點擊版位（貼文） | `EmbedWidgetView` 的 `onClick` → `EmbedWidgetClick.trackingUrl` | 目前頁面（`EmbedWidgetView` 的 `pageUrl`） | 版位的 embedLocation |
+| 點擊商品連結（版位或 Lightbox 內） | `EmbedAndroidSDK.setLinkClickHandler` → `EmbedLinkClick.trackingUrl` | 被點擊的商品連結 | `LINK` |
+
+```kotlin
+// 1. 點擊版位
+EmbedWidgetView(
+    pageUrl = pageUrl,
+    position = EmbedAndroidSDK.BELOW_BUY_BUTTON,
+    onClick = { click ->
+        // click.trackingUrl 例：https://{shop}/SalePage/Index/{目前頁 id}?utm_source=embed_tagnology&utm_id=...&utm_content=...&utm_medium=BELOW_BUY_BUTTON&utm_campaign=...&utm_term=...
+        analytics.track(click.trackingUrl)
+    },
+)
+
+// 2. 點擊商品連結（Application.onCreate() 設定一次）
+EmbedAndroidSDK.setLinkClickHandler { click ->
+    // click.trackingUrl 例：https://{shop}/SalePage/Index/{商品 id}?utm_source=embed_tagnology&utm_content=...&utm_medium=LINK&utm_id=...&utm_campaign=...&utm_term=...
+    analytics.track(click.trackingUrl)
+    navigator.toNavigator(click.url)   // 導頁用 click.url（原始連結）或 trackingUrl 皆可
+}
+```
+
+```java
+// Java
+EmbedAndroidSDK.setLinkClickHandler(click -> {
+    analytics.track(click.getTrackingUrl());
+    return navigator.toNavigator(click.getUrl());
+});
+```
+
+共同規則：
+
+- 參數：`utm_source=embed_tagnology`、`utm_id`（folderId）、`utm_content`（貼文 mediaId）、`utm_medium`、`utm_campaign`（內容牆名稱）、`utm_term`（來源頁網址）。
+- SDK 沒有值的欄位保留參數、值留空（例如 `utm_content=`）。
+- 非 http(s) 的網址（`tel:`、`intent:`）`trackingUrl` 為 `null`。
+- `setLinkHandler` 照舊可用（收到原始網址），要拿 `trackingUrl` 請改用 `setLinkClickHandler`；兩者共用同一個 handler，以最後設定的為準。
+- 完整規則：[點擊版位](#widget-點擊-callback給-app-端自訂事件追蹤)、[點擊商品連結](#取得連結的-trackingurlsetlinkclickhandler)。
+
 ## 變更記錄
 
-### 未發版
+### v1.0.10（2026-11-26）
 
+- ⭐ **新增 `trackingUrl`**（說明見 [點擊追蹤網址 trackingUrl](#-點擊追蹤網址-trackingurlv1010-新增)）
 - `EmbedWidgetClick` 新增 `trackingUrl: String?`（預設 null，既有呼叫端不需改程式）：版位被點擊時，以與網頁版 91app script 相同的規則，在目前頁面網址（`EmbedWidgetView` 的 `pageUrl`）加上 UTM，例如 `https://{shop}/SalePage/Index/{id}?utm_source=embed_tagnology&utm_id=<folderId>&utm_content=<mediaId>&utm_medium=<嵌入位置>&utm_campaign=<內容牆名稱>&utm_term=<來源頁網址>`。
 - 新增 `EmbedAndroidSDK.setLinkClickHandler`：與 `setLinkHandler` 相同，但 handler 收到 `EmbedLinkClick`，含被點擊的連結 `url`、SDK 組好完整 UTM 的 `trackingUrl`（以被點擊的商品連結為主，`utm_medium=LINK`），以及 `folderId`、`folderName`、`position`、`mediaId`、`pageUrl`。`setLinkHandler` 照舊可用、收到的網址不變；兩者共用同一個 handler，以最後設定的為準。
 - SDK 沒有值的 UTM 欄位保留參數、值留空（例如 `utm_content=`）。
@@ -127,18 +173,18 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 本專案已加入 `jitpack.yml`，使用 JDK 17 建置 SDK module。
 
-### 發版步驟（v1.0.9）
+### 發版步驟（v1.0.10）
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag v1.0.9
-git push origin v1.0.9
+git tag v1.0.10
+git push origin v1.0.10
 ```
 
 到 JitPack 確認建置：
 
-- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.9`
+- `https://jitpack.io/#tagnologytw/embed-android-sdk/v1.0.10`
 
 ### 使用方式
 
@@ -149,7 +195,7 @@ maven { url = uri("https://jitpack.io") }
 
 ```kotlin
 // app module dependency
-implementation("com.github.tagnologytw:embed-android-sdk:v1.0.9")
+implementation("com.github.tagnologytw:embed-android-sdk:v1.0.10")
 ```
 
 ## 使用方式（SDK）
