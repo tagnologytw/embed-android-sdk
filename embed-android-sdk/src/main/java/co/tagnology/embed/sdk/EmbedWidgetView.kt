@@ -74,6 +74,8 @@ fun EmbedWidgetView(
     var lightboxMessageJson by remember { mutableStateOf<String?>(null) }
     var lastEventJson by remember { mutableStateOf<String?>(null) }
     var lastEventAtMs by remember { mutableStateOf(0L) }
+    // The widget click that opened the lightbox; passed with links tapped in it.
+    var lightboxLinkContext by remember { mutableStateOf(EmbedLinkContext()) }
     val widgetsById = remember(widgets) { widgets.associateBy { it.folderId } }
 
     fun logLightbox(message: String) {
@@ -99,7 +101,17 @@ fun EmbedWidgetView(
                 fallbackPosition = position,
                 fallbackPageUrl = pageUrl,
                 widgetsById = widgetsById,
-            )?.let { click -> onClick?.invoke(click) }
+            )?.let { click ->
+                Log.d(tag, "widget click folderId=${click.folderId} mediaId=${click.mediaId} trackingUrl=${click.trackingUrl}")
+                lightboxLinkContext = EmbedLinkContext(
+                    pageUrl = pageUrl,
+                    folderId = click.folderId,
+                    folderName = click.folderName,
+                    position = click.position,
+                    mediaId = click.mediaId,
+                )
+                onClick?.invoke(click)
+            }
         }
 
         if (!enableLightbox || DEBUG_DISABLE_LIGHTBOX) return
@@ -256,7 +268,16 @@ fun EmbedWidgetView(
                                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                     val target = request?.url?.toString().orEmpty()
                                     if (!shouldOpenOutsideWidget(target, request?.isForMainFrame == true)) return false
-                                    val outcome = EmbedLinkOpener.open(context, target)
+                                    val outcome = EmbedLinkOpener.open(
+                                        context,
+                                        target,
+                                        EmbedLinkContext(
+                                            pageUrl = pageUrl,
+                                            folderId = widget.folderId,
+                                            folderName = widget.folderName,
+                                            position = widget.position,
+                                        ),
+                                    )
                                     Log.d(tag, "widget=${widget.folderId} slot=${widget.position} external_link url=$target outcome=$outcome")
                                     return true
                                 }
@@ -285,6 +306,13 @@ fun EmbedWidgetView(
                                         position = widget.position,
                                         mediaId = widget.mediaId,
                                         url = widget.clickUrl,
+                                        trackingUrl = EmbedTrackingUrl.forWidgetClick(
+                                            pageUrl = pageUrl,
+                                            folderId = widget.folderId,
+                                            folderName = widget.folderName,
+                                            embedLocation = widget.embedLocation,
+                                            mediaId = widget.mediaId,
+                                        ),
                                     )
                                 )
                             }
@@ -315,6 +343,7 @@ fun EmbedWidgetView(
             enabled = enableLightbox && widgets.isNotEmpty(),
             visible = showLightbox,
             pendingMessageJson = lightboxMessageJson,
+            linkContext = lightboxLinkContext,
             canonicalPage = canonicalPage,
             onEvent = { event ->
                 onEvent?.invoke(event)
@@ -358,6 +387,7 @@ private fun LightboxOverlayHost(
     enabled: Boolean,
     visible: Boolean,
     pendingMessageJson: String?,
+    linkContext: EmbedLinkContext,
     canonicalPage: String,
     onEvent: (EmbedWidgetEvent) -> Unit,
     onDismiss: () -> Unit,
@@ -366,8 +396,10 @@ private fun LightboxOverlayHost(
     val context = LocalContext.current
     val currentOnEvent by rememberUpdatedState(onEvent)
     val currentOnDismiss by rememberUpdatedState(onDismiss)
+    val currentLinkContext by rememberUpdatedState(linkContext)
     val client = remember {
         object : LightboxClient {
+            override val linkContext: EmbedLinkContext get() = currentLinkContext
             override fun onLightboxEvent(event: EmbedWidgetEvent) = currentOnEvent(event)
             override fun onLightboxDismissed() = currentOnDismiss()
         }
@@ -683,7 +715,7 @@ private fun parseClickEvent(
 
         val position = extractPosition(item) ?: widget?.position ?: fallbackPosition
         val folderName = extractString(item, "folderName") ?: widget?.folderName.orEmpty()
-        val mediaId = extractString(item, "mediaId", "mediaID", "media_id")
+        val mediaId = EmbedClickPayload.mediaId(item)
         val url = extractString(item, "url", "productUrl", "clickUrl", "href")
             ?: widget?.clickUrl
             ?: fallbackPageUrl
@@ -694,6 +726,15 @@ private fun parseClickEvent(
             position = position,
             mediaId = mediaId,
             url = url,
+            // Same UTM as the web 91app script: the page URL, utm_medium is the folder's
+            // embedLocation and utm_campaign prefers the folder's own name.
+            trackingUrl = EmbedTrackingUrl.forWidgetClick(
+                pageUrl = fallbackPageUrl,
+                folderId = folderId,
+                folderName = widget?.folderName?.takeIf { it.isNotEmpty() } ?: folderName,
+                embedLocation = widget?.embedLocation,
+                mediaId = mediaId,
+            ),
         )
     }.getOrNull()
 }

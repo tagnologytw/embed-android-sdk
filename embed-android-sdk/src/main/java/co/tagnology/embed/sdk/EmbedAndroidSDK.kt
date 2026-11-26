@@ -58,6 +58,18 @@ object EmbedAndroidSDK {
      */
     @JvmStatic
     fun setLinkHandler(handler: EmbedLinkHandler?) {
+        EmbedLinkOpener.appHandler = handler?.let { EmbedLinkClickHandler { click -> it.shouldOverrideUrl(click.url) } }
+    }
+
+    /**
+     * Same as [setLinkHandler], but the handler gets an [EmbedLinkClick]: the tapped link
+     * ([EmbedLinkClick.url]), the link with the full embed UTM composed by the SDK
+     * ([EmbedLinkClick.trackingUrl]), and the widget it was tapped in (folderId, folderName,
+     * position, mediaId, pageUrl). Return values work the same as [setLinkHandler].
+     * setLinkHandler and setLinkClickHandler share one slot; the last call wins.
+     */
+    @JvmStatic
+    fun setLinkClickHandler(handler: EmbedLinkClickHandler?) {
         EmbedLinkOpener.appHandler = handler
     }
 

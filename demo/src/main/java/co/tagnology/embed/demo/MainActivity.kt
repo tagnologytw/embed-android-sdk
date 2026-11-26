@@ -14,7 +14,10 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(isDebuggable)
         // adb shell am start -n co.tagnology.embed.demo/.MainActivity --ez nativeProductLinks true
         if (intent.getBooleanExtra("nativeProductLinks", false)) {
-            EmbedAndroidSDK.setLinkHandler { url -> NativeProductActivity.open(this, url) }
+            EmbedAndroidSDK.setLinkClickHandler { click ->
+                android.util.Log.d("EmbedDemo", "link trackingUrl=${click.trackingUrl}")
+                NativeProductActivity.open(this, click.url)
+            }
         }
         setContent { EcommerceDemoPage() }
     }
