@@ -21,6 +21,15 @@ Tagnology Android 內容牆 SDK（電商頁面嵌入）
 
 ## 變更記錄
 
+### 未發版
+
+- `EmbedWidgetClick` 新增 `trackingUrl: String?`（預設 null，既有呼叫端不需改程式）：版位被點擊時，以與網頁版 91app script 相同的規則，在目前頁面網址（`EmbedWidgetView` 的 `pageUrl`）加上 UTM，例如 `https://{shop}/SalePage/Index/{id}?utm_source=embed_tagnology&utm_id=<folderId>&utm_content=<mediaId>&utm_medium=<嵌入位置>&utm_campaign=<內容牆名稱>&utm_term=<來源頁網址>`。
+- 新增 `EmbedAndroidSDK.setLinkClickHandler`：與 `setLinkHandler` 相同，但 handler 收到 `EmbedLinkClick`，含被點擊的連結 `url`、SDK 組好完整 UTM 的 `trackingUrl`（以被點擊的商品連結為主，`utm_medium=LINK`），以及 `folderId`、`folderName`、`position`、`mediaId`、`pageUrl`。`setLinkHandler` 照舊可用、收到的網址不變；兩者共用同一個 handler，以最後設定的為準。
+- SDK 沒有值的 UTM 欄位保留參數、值留空（例如 `utm_content=`）。
+- 精選動態（Highlight）的點擊資料沒有 `mediaId`：`EmbedWidgetClick.mediaId`／`utm_content` 改用網頁預抓清單（`mediaList`）的第一則；網頁沒有預抓到時仍為空。
+- 與 iOS SDK 1.0.19 行為相同。
+- 測試：`EmbedTrackingUrlTest`。
+
 ### v1.0.9（2026-11-23）
 
 - 新增錯誤碼 `APP_SDK_DISABLED`：商家在 Tagnology 後台尚未開通「App SDK」權限（預設關閉）時，`/widget/pageBundle` 回 HTTP 403 + `errorCode: "APP_SDK_DISABLED"`，`initialize` 會回傳 `statusCode = 403`、`errorCode = EmbedAndroidSDK.ERROR_CODE_APP_SDK_DISABLED` 的 `EmbedWidgetLoadError`。App 收到時**不要顯示任何版位、不要重試**。
@@ -173,7 +182,7 @@ if (error == null) {
         },
         onClick = { click ->
             // 官方建議：在此串接 GA / Firebase / 自家事件
-            // click.folderId / click.folderName / click.position / click.mediaId / click.url
+            // click.folderId / click.folderName / click.position / click.mediaId / click.url / click.trackingUrl
         },
         onEvent = { event ->
             // event.type / event.payloadJson
@@ -249,6 +258,20 @@ EmbedWidgetView(
 - `position`：版位（`EmbedPosition`）。
 - `mediaId`：被點擊素材 id（若 payload 無提供則為 `null`）。
 - `url`：點擊對應網址（無值時回退為目前 pageUrl）。
+- `trackingUrl`：目前頁面網址（`pageUrl`）加上與網頁版 91app script 點擊版位時相同的 UTM；`pageUrl` 不是 http(s) 時為 `null`。
+
+| 參數 | 值 |
+|---|---|
+| `utm_source` | `embed_tagnology` |
+| `utm_id` | `folderId` |
+| `utm_content` | `mediaId`（精選動態用預抓清單的第一則；都沒有時留空） |
+| `utm_medium` | 版位的 `embedLocation`（沒有時為 `CUSTOMIZED`） |
+| `utm_campaign` | 內容牆名稱（沒有時為 `folderId`） |
+| `utm_term` | 來源頁網址（`pageUrl` 去掉 query 與 `#`） |
+
+- `pageUrl` 原有的其他 query 與 `#` 會保留；先前的 `embed_tagnology` UTM 會被這次點擊覆蓋。
+- 若 `pageUrl` 已帶其他來源的 `utm_source`（例如 `facebook`），不覆蓋對方的 UTM，只把 `utm_content` 改成 `<原 utm_content>+embed_tagnology`（原本沒有則為 `embed_tagnology`）。
+- 網址編碼與瀏覽器 `URLSearchParams` 相同（空白為 `+`，`+` 為 `%2B`）。
 
 ### 商品連結交給 App 開啟（`setLinkHandler`）
 
@@ -280,6 +303,34 @@ EmbedAndroidSDK.setLinkHandler(url -> navigator.toNavigator(url));
 - 網址原封不動傳入（含 `utm_*` 等 query），解析方式由 App 決定；SDK 不針對特定電商平台判斷。
 - 只有離開 `embed.tagnology.co` 的連結會交給 handler（商品頁、Instagram、`intent://`、`tel:`、`mailto:`、`line:` 等），版位與 Lightbox 自身的頁面不會。
 - 點擊成效追蹤由版位網頁在開啟連結前送出，不受 handler 影響。
+
+#### 取得連結的 trackingUrl（`setLinkClickHandler`）
+
+App 若要用 UTM 追蹤商品連結點擊，改用 `setLinkClickHandler`。回傳值的意義與 `setLinkHandler` 相同；兩者共用同一個 handler，以最後設定的為準。
+
+```kotlin
+EmbedAndroidSDK.setLinkClickHandler { click ->
+    // click.url          被點擊的連結（原封不動，與 setLinkHandler 收到的相同）
+    // click.trackingUrl  被點擊的連結 + SDK 組好的完整 UTM；非 http(s) 連結（tel:、intent:）為 null
+    // click.folderId / click.folderName / click.position / click.mediaId / click.pageUrl
+    navigator.toNavigator(click.url)
+}
+```
+
+`trackingUrl` 規則（與網頁版 `Helper.AddUTMParams` 相同）：
+
+| 參數 | 值 |
+|---|---|
+| `utm_source` | `embed_tagnology` |
+| `utm_content` | `mediaId` |
+| `utm_medium` | `LINK` |
+| `utm_id` | `folderId` |
+| `utm_campaign` | 內容牆名稱 |
+| `utm_term` | 來源頁網址（`pageUrl` 完整網址） |
+
+- SDK 沒有值的欄位保留參數、值留空（例如 `utm_campaign=`）。
+- 連結若已由網頁帶上 `utm_source=embed_tagnology`，沿用網頁的值（Lightbox 內可能已切換到別則貼文），SDK 只補上缺的欄位。
+- 連結原有的其他來源 UTM 會被取代，與網頁版相同；其他 query 與 `#` 保留。
 
 Demo App 有完整範例（`demo/.../NativeProductActivity.kt`：把 `SalePage/Index/{id}` 開成原生頁，其他網址回傳 `false`）。預設不啟用，以下列指令啟動 demo 即可試用：
 

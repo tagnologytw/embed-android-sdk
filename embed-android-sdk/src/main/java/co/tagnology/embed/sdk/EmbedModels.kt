@@ -54,12 +54,19 @@ data class EmbedWidgetLoadError(
     val errorCode: String? = null,
 )
 
+/**
+ * @property trackingUrl The page URL with the same UTM the web script adds when a widget is
+ *           clicked, for example `https://{shop}/SalePage/Index/{id}?utm_source=embed_tagnology&utm_id=...`.
+ *           A value the SDK does not have is left empty (for example `utm_content=`).
+ *           null when the page URL is not http(s).
+ */
 data class EmbedWidgetClick(
     val folderId: String,
     val folderName: String,
     val position: EmbedPosition,
     val mediaId: String?,
     val url: String,
+    val trackingUrl: String? = null,
 )
 
 data class EmbedWidgetEvent(
@@ -76,4 +83,6 @@ data class EmbedWidgetItem(
     val clickUrl: String,
     val mediaId: String? = null,
     val floatingMediaPosition: String? = null,
+    /** pageBundle embedLocation as sent (utm_medium of the click tracking URL, like the web). */
+    val embedLocation: String? = null,
 )

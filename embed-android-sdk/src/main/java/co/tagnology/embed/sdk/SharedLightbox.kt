@@ -30,6 +30,8 @@ import org.json.JSONObject
 
 /** Receives what happens in a [SharedLightbox] while this widget owns it. */
 internal interface LightboxClient {
+    /** The widget click that opened the lightbox; passed with links tapped in it. */
+    val linkContext: EmbedLinkContext get() = EmbedLinkContext()
     fun onLightboxEvent(event: EmbedWidgetEvent)
     fun onLightboxDismissed()
 }
@@ -425,7 +427,7 @@ internal class SharedLightbox private constructor(
                         return true
                     }
                     if (mainFrame && shouldOpenOutsideLightbox(target, request?.hasGesture() == true)) {
-                        val outcome = EmbedLinkOpener.open(context, target)
+                        val outcome = EmbedLinkOpener.open(context, target, activeClient?.linkContext ?: EmbedLinkContext())
                         Log.d(TAG, "lightbox external_link url=$target outcome=$outcome")
                         // App 以原生頁開啟商品連結時關閉 Lightbox，避免原生頁被覆蓋層蓋住；
                         // 非頁面自行關閉，dismiss 會重載 Lightbox 讓影片停止播放（post 出去，不在導頁回呼中重載）

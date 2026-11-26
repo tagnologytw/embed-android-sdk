@@ -128,6 +128,7 @@ internal object EmbedApi {
                 clickUrl = clickUrl,
                 mediaId = mediaId,
                 floatingMediaPosition = floatingMediaPosition,
+                embedLocation = embedLocation.ifBlank { null },
             )
         }
 
